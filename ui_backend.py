@@ -9,6 +9,7 @@ import correction_policy
 from batch_manager import attach_job_to_batch, clear_open_batch_pointer, create_new_open_batch, find_batches_by_status, get_or_create_open_batch, load_batch, load_automation_settings, save_automation_settings, update_batch
 from job_queue import atomic_write_json, now_iso, queue_claim_lock, read_json, update_status
 from video_assembler import VideoAssemblerError, assemble_clips, probe_video
+import seed_library
 from workflow_builder import KOREAN_SPEECH_POLICY, resolve_seed, sanitize_token
 
 HOME=Path.home()
@@ -65,6 +66,13 @@ def safe_name(name,data,index):
     suffix=Path(name).suffix.lower() or ".png"; stem=sanitize_token(Path(name).stem,fallback=f"image_{index:02d}")
     return f"{index:02d}_{stem}_{hashlib.sha256(data).hexdigest()[:10]}{suffix}"
 
+def resolve_video_seed(data: dict[str,Any])->tuple[int,int,str]:
+    raw=int(data.get("seed_input", data.get("seed", -1)))
+    explicit=int(data.get("seed", raw))
+    if explicit>=0:
+        return explicit, raw, "fixed" if raw>=0 else "fixed_override"
+    return resolve_seed(-1), raw, "random"
+
 def create_action(data, target_batch_id: str | None = None):
     template=Path(str(data.get("template_path") or CR)).expanduser().resolve()
     if not template.is_file() or WF_DIR.resolve() not in template.parents: raise ValueError("허용된 API 워크플로가 아닙니다.")
@@ -92,8 +100,8 @@ def create_action(data, target_batch_id: str | None = None):
         incoming=Path(str(row["upload_path"])); raw=incoming.read_bytes(); stored=safe_name(str(row.get("original_name") or incoming.name),raw,i); dest=src/stored; shutil.copy2(incoming,dest)
         segments.append({"original_name":str(row.get("original_name") or incoming.name),"stored_name":stored,"source_path":str(dest),"sha256":hashlib.sha256(raw).hexdigest(),"prompt":str(row.get("prompt") or "").strip(),"seconds":float(row.get("seconds") or 5),"order":int(row.get("order") or i)})
     if any(not x["prompt"] for x in segments):raise ValueError("모든 이미지 구간에 프롬프트가 필요합니다.")
-    seed=resolve_seed(int(data.get("seed",-1))); created=now_iso(); width=int(data.get("width") or DEFAULT_GENERATION_WIDTH); height=int(data.get("height") or DEFAULT_GENERATION_HEIGHT)
-    req={"schema_version":2,"job_type":"generate","pipeline_stage":"initial_generation","job_id":jid,"batch_id":batch_id,"job_dir":str(d),"created_at":created,"job_name":name,"template_path":str(snap),"workflow_source_path":str(template),"workflow_filename":template.name,"workflow_kind":"create","workflow_kind_label":"생성 (CR)","comfy_url":os.environ.get("COMFY_URL","http://127.0.0.1:8188"),"comfy_public_url":os.environ.get("COMFY_PUBLIC_URL",""),"comfy_start_script":os.environ.get("COMFY_START_SCRIPT",str(HOME/"bin/ai-start-comfy")),"comfy_start_timeout":float(os.environ.get("COMFY_START_TIMEOUT","180")),"auto_start_comfy":True,"fps":int(data.get("fps") or 24),"seed":seed,"resolution":{"width":width,"height":height,"label":f"{width} × {height}"},"global_prompt":str(data.get("global_prompt") or DEFAULT_GLOBAL).strip(),"duration_mode":str(data.get("duration_mode") or "각 구간 시간의 합계"),"target_total_seconds":data.get("target_total_seconds"),"filename_prefix":f"video/jobs/{jid}/{token}","segments":segments,"parent_job_id":None,"attempt":0,"automation":dict(batch.get("automation") or settings)}
+    seed,raw_seed,seed_mode=resolve_video_seed(data); created=now_iso(); width=int(data.get("width") or DEFAULT_GENERATION_WIDTH); height=int(data.get("height") or DEFAULT_GENERATION_HEIGHT)
+    req={"schema_version":2,"job_type":"generate","pipeline_stage":"initial_generation","job_id":jid,"batch_id":batch_id,"job_dir":str(d),"created_at":created,"job_name":name,"template_path":str(snap),"workflow_source_path":str(template),"workflow_filename":template.name,"workflow_kind":"create","workflow_kind_label":"생성 (CR)","comfy_url":os.environ.get("COMFY_URL","http://127.0.0.1:8188"),"comfy_public_url":os.environ.get("COMFY_PUBLIC_URL",""),"comfy_start_script":os.environ.get("COMFY_START_SCRIPT",str(HOME/"bin/ai-start-comfy")),"comfy_start_timeout":float(os.environ.get("COMFY_START_TIMEOUT","180")),"auto_start_comfy":True,"fps":int(data.get("fps") or 24),"seed":seed,"seed_input":raw_seed,"seed_mode":seed_mode,"resolution":{"width":width,"height":height,"label":f"{width} × {height}"},"global_prompt":str(data.get("global_prompt") or DEFAULT_GLOBAL).strip(),"duration_mode":str(data.get("duration_mode") or "각 구간 시간의 합계"),"target_total_seconds":data.get("target_total_seconds"),"filename_prefix":f"video/jobs/{jid}/{token}","segments":segments,"parent_job_id":None,"attempt":0,"automation":dict(batch.get("automation") or settings)}
     candidate_set_id=str(data.get("candidate_set_id") or "").strip()
     if candidate_set_id:
         req.update(candidate_set_id=candidate_set_id,
@@ -139,7 +147,7 @@ def create_candidates_action(data):
     count=int(data.get("candidate_count") or 3)
     if count<2 or count>8:raise ValueError("후보 개수는 2~8개여야 합니다.")
     candidate_set_id=f"cset_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(2)}"
-    base_seed=resolve_seed(int(data.get("seed",-1)));modulus=(1<<63)-1
+    raw_seed=int(data.get("seed",-1));modulus=(1<<63)-1
     explicit=data.get("candidate_seeds") or []
     if explicit and len(explicit)!=count:raise ValueError("candidate_seeds 개수가 후보 개수와 일치하지 않습니다.")
     settings=load_automation_settings(ROOT);batch=create_new_open_batch(ROOT,settings);batch_id=str(batch["batch_id"])
@@ -149,8 +157,14 @@ def create_candidates_action(data):
                  message=f"후보 영상 {count}개를 독립 배치에 등록하고 있습니다.")
     for index in range(1,count+1):
         candidate_data=dict(data)
+        if explicit:
+            candidate_seed=int(explicit[index-1])
+        elif raw_seed<0:
+            candidate_seed=resolve_seed(-1)
+        else:
+            candidate_seed=(raw_seed+index-1)%modulus
         candidate_data.update(candidate_set_id=candidate_set_id,candidate_index=index,candidate_count=count,
-                              seed=int(explicit[index-1]) if explicit else (base_seed+index-1)%modulus)
+                              seed=candidate_seed,seed_input=raw_seed,seed_mode="random" if raw_seed<0 else "fixed")
         created_jobs.append(create_action(candidate_data,target_batch_id=batch_id))
     batch_ids={item["batch_id"] for item in created_jobs}
     if len(batch_ids)!=1:raise RuntimeError("하나의 후보군이 여러 배치로 분리되었습니다.")
@@ -183,6 +197,8 @@ def select_candidate_action(data):
             path=item["dir"]/filename;record=read_json(path,{}) or {};record.update(candidate_selected=selected,selected_at=selected_at if selected else None);atomic_write_json(path,record)
     payload.update(status="selected",selected_job_id=selected_job_id,selected_at=selected_at)
     save_candidate_set(payload)
+    selected_item=job(selected_job_id)
+    seed_library.mark_selected_final(ROOT,selected_job_id,selected_item["request"],selected_item["dir"])
     update_batch(ROOT,str(payload["batch_id"]),status="candidate_selected",stage="user_candidate_selected",
                  next_stage="final_review",selected_candidate_job_id=selected_job_id,
                  message=f"최종 후보 {selected_job_id}가 선택되었습니다. 04 최종 마스터에서 AI 검수를 등록하세요.")
@@ -241,6 +257,68 @@ def _candidate_clip_item(item: dict[str,Any])->dict[str,Any]:
             "batch_id":str(request.get("batch_id") or ""),"fps":fps,"resolution":{"width":width,"height":height},
             "duration_seconds":round(duration,3),"video_url":f"/api/jobs/{item['job_id']}/video",
             "source_path":str(source_path)}
+
+IMAGE_SUFFIXES={".png",".jpg",".jpeg",".webp"}
+
+def _safe_job_source_path(path: Path)->bool:
+    try:path.resolve().relative_to(JOBS.resolve())
+    except ValueError:return False
+    return path.suffix.lower() in IMAGE_SUFFIXES
+
+def _iter_source_image_refs():
+    if not JOBS.is_dir():return
+    for directory in sorted(JOBS.iterdir(),key=lambda x:x.name,reverse=True):
+        if not directory.is_dir():continue
+        request=read_json(directory/"request.json",{}) or {}
+        for segment in request.get("segments") or []:
+            sha=str(segment.get("sha256") or "").strip().lower()
+            if len(sha)!=64:continue
+            yield {"job_id":directory.name,"sha256":sha,"original_name":str(segment.get("original_name") or segment.get("stored_name") or "image.png"),
+                   "source_path":Path(str(segment.get("source_path") or "")),"created_at":str(request.get("created_at") or "")}
+
+def source_image_library_action(_data=None)->dict[str,Any]:
+    entries: dict[str,dict[str,Any]]={}
+    for ref in _iter_source_image_refs():
+        path=ref["source_path"]
+        if not path.is_file() or not _safe_job_source_path(path):continue
+        sha=ref["sha256"]; size=path.stat().st_size
+        if sha not in entries:
+            entries[sha]={"sha256":sha,"original_name":ref["original_name"],"size_bytes":size,"ref_count":0,
+                          "preview_url":f"/api/source-images/{sha}/file","latest_job_id":ref["job_id"],
+                          "latest_created_at":ref["created_at"],"job_ids":[]}
+        entry=entries[sha]; entry["ref_count"]+=1
+        if ref["job_id"] not in entry["job_ids"]:entry["job_ids"].append(ref["job_id"])
+        if ref["created_at"]>=entry.get("latest_created_at",""):
+            entry.update(latest_job_id=ref["job_id"],latest_created_at=ref["created_at"],original_name=ref["original_name"],size_bytes=size)
+    images=sorted(entries.values(),key=lambda x:(x.get("latest_created_at") or "",x["sha256"]),reverse=True)
+    for item in images:item.pop("latest_created_at",None)
+    return {"images":images}
+
+def _canonical_source_image_path(sha256: str)->Path:
+    digest=str(sha256 or "").strip().lower()
+    if len(digest)!=64 or any(ch not in "0123456789abcdef" for ch in digest):raise ValueError("허용되지 않는 이미지 해시입니다.")
+    for ref in _iter_source_image_refs():
+        if ref["sha256"]!=digest:continue
+        path=ref["source_path"]
+        if path.is_file() and _safe_job_source_path(path):return path
+    raise FileNotFoundError(f"저장된 이미지를 찾을 수 없습니다: {digest[:12]}…")
+
+def source_image_file_action(data)->dict[str,Any]:
+    return {"path":str(_canonical_source_image_path(str(data.get("sha256") or "")))}
+
+def delete_source_image_action(data)->dict[str,Any]:
+    digest=str(data.get("sha256") or "").strip().lower()
+    if len(digest)!=64 or any(ch not in "0123456789abcdef" for ch in digest):raise ValueError("허용되지 않는 이미지 해시입니다.")
+    deleted_paths:set[str]=set()
+    for ref in _iter_source_image_refs():
+        if ref["sha256"]!=digest:continue
+        path=ref["source_path"]
+        if not path.is_file() or not _safe_job_source_path(path):continue
+        resolved=str(path.resolve())
+        if resolved in deleted_paths:continue
+        path.unlink(missing_ok=True); deleted_paths.add(resolved)
+    if not deleted_paths:raise FileNotFoundError(f"삭제할 저장 이미지가 없습니다: {digest[:12]}…")
+    return {"sha256":digest,"deleted_files":len(deleted_paths),"deleted":True}
 
 def clip_library_action(_data=None)->dict[str,Any]:
     clips=[]
@@ -746,8 +824,26 @@ def delete_batch_history_action(data):
     if current.get("batch_id")==batch_id: pointer.unlink(missing_ok=True)
     return {"batch_id":batch_id,"deleted":True}
 
+def like_seed_action(data)->dict[str,Any]:
+    job_id=str(data.get("job_id") or "").strip()
+    item=job(job_id)
+    if str(item["status"].get("status") or "")!="completed":
+        raise RuntimeError("완료된 후보만 seed를 저장할 수 있습니다.")
+    entry=seed_library.like_seed_entry(ROOT,job_id,item["request"],item["dir"])
+    return {"entry":entry,"liked":True,"job_id":job_id}
+
+def list_seed_library_action(_data=None)->dict[str,Any]:
+    return seed_library.list_seed_library(ROOT)
+
+def recommend_seeds_action(data)->dict[str,Any]:
+    limit=int(data.get("limit") or 5)
+    return seed_library.recommend_seeds(ROOT,data,limit=max(1,min(limit,10)))
+
+def delete_seed_library_action(data)->dict[str,Any]:
+    return seed_library.delete_seed_entry(ROOT,str(data.get("entry_id") or ""))
+
 def main():
     action=sys.argv[1]; data=json.load(sys.stdin)
-    out={"prompt":prompt_action,"create":create_action,"create_candidates":create_candidates_action,"select_candidate":select_candidate_action,"manual":manual_action,"clip_library":clip_library_action,"list_compositions":list_compositions_action,"create_composition":create_composition_action,"update_composition":update_composition_action,"assemble_composition":assemble_composition_action,"import_composition_video":import_composition_video_action,"register_candidate_final_review":register_candidate_final_review_action,"register_composition_final_review":register_composition_final_review_action,"delete_composition":delete_composition_action,"delete_candidate_set":delete_candidate_set_action,"delete_lineage":delete_lineage_action,"delete_queued_job":delete_queued_job_action,"force_cancel_batch":force_cancel_batch_action,"delete_batch_history":delete_batch_history_action,"settings":lambda d:save_automation_settings(ROOT,d)}[action](data)
+    out={"prompt":prompt_action,"create":create_action,"create_candidates":create_candidates_action,"select_candidate":select_candidate_action,"manual":manual_action,"clip_library":clip_library_action,"source_image_library":source_image_library_action,"source_image_file":source_image_file_action,"delete_source_image":delete_source_image_action,"like_seed":like_seed_action,"list_seed_library":list_seed_library_action,"recommend_seeds":recommend_seeds_action,"delete_seed_library":delete_seed_library_action,"list_compositions":list_compositions_action,"create_composition":create_composition_action,"update_composition":update_composition_action,"assemble_composition":assemble_composition_action,"import_composition_video":import_composition_video_action,"register_candidate_final_review":register_candidate_final_review_action,"register_composition_final_review":register_composition_final_review_action,"delete_composition":delete_composition_action,"delete_candidate_set":delete_candidate_set_action,"delete_lineage":delete_lineage_action,"delete_queued_job":delete_queued_job_action,"force_cancel_batch":force_cancel_batch_action,"delete_batch_history":delete_batch_history_action,"settings":lambda d:save_automation_settings(ROOT,d)}[action](data)
     print(json.dumps(out,ensure_ascii=False))
 if __name__=="__main__":main()
