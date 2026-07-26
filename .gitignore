@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Runtime data (local pipeline state)
+jobs/
+runtime/
+
+# Worker / process status
+worker_status.json
+
+# Editor / backup artifacts
+*.orig
+*.bak.*
+*~
+
+# OS / env
+.DS_Store
+.env
+.env.*
+
+# Node (if added later)
+node_modules/
