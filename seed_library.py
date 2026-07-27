@@ -184,6 +184,24 @@ def like_seed_entry(root: Path, job_id: str, request: dict[str,Any], job_dir: Pa
     return save_entry(root,entry)
 
 
+def unlike_seed_entry(root: Path, job_id: str)->dict[str,Any]:
+    existing=find_entry_by_job(root,job_id)
+    if not existing:
+        return {"job_id":job_id,"liked":False,"deleted":False}
+    if existing.get("signals",{}).get("selected_final"):
+        existing.setdefault("signals",{})["liked"]=False
+        existing["signals"]["liked_at"]=None
+        saved=save_entry(root,existing)
+        return {"job_id":job_id,"liked":False,"deleted":False,"entry":saved}
+    if str(existing.get("source",{}).get("kind") or "")=="candidate_like":
+        deleted=delete_seed_entry(root,str(existing["entry_id"]))
+        return {"job_id":job_id,"liked":False,"deleted":True,"entry_id":deleted["entry_id"]}
+    existing.setdefault("signals",{})["liked"]=False
+    existing["signals"]["liked_at"]=None
+    saved=save_entry(root,existing)
+    return {"job_id":job_id,"liked":False,"deleted":False,"entry":saved}
+
+
 def mark_selected_final(root: Path, job_id: str, request: dict[str,Any], job_dir: Path)->dict[str,Any]|None:
     existing=find_entry_by_job(root,job_id)
     if existing:

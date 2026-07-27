@@ -121,6 +121,39 @@ class CandidatePipelineTest(unittest.TestCase):
         self.assertEqual(request["resolution"], {"width": 1536, "height": 864, "label": "1536 × 864"})
 
     @patch("ui_backend.probe_video", return_value={"duration_seconds": 5.0, "width": 1536, "height": 864, "fps": 24})
+    def test_clip_library_excludes_legacy_upscale_jobs(self, _probe):
+        candidate_set = ui_backend.create_candidates_action(self.candidate_payload())
+        self.complete_candidate_set(candidate_set)
+        candidate_id = candidate_set["candidate_job_ids"][0]
+        candidate_request = json.loads((self.jobs / candidate_id / "request.json").read_text())
+        upscale_id = f"{candidate_id}__composition_upscale_balanced_ab12"
+        upscale_dir = self.jobs / upscale_id
+        upscale_dir.mkdir()
+        atomic_write_json(
+            upscale_dir / "request.json",
+            {
+                **candidate_request,
+                "job_id": upscale_id,
+                "job_type": "upscale",
+                "pipeline_stage": "composition_upscale",
+                "workflow_kind_label": "레거시 업스케일",
+            },
+        )
+        atomic_write_json(upscale_dir / "manifest.json", {"status": "completed", "outputs": []})
+        update_status(upscale_dir, "completed", stage="완료", progress=1.0)
+
+        library = ui_backend.clip_library_action()["clips"]
+        self.assertEqual({clip["source_job_id"] for clip in library}, set(candidate_set["candidate_job_ids"]))
+
+        payload = ui_backend.load_candidate_set(candidate_set["candidate_set_id"])
+        payload["candidate_job_ids"].append(upscale_id)
+        ui_backend.save_candidate_set(payload)
+        with self.assertRaises(ValueError):
+            ui_backend.select_candidate_action(
+                {"candidate_set_id": candidate_set["candidate_set_id"], "job_id": upscale_id}
+            )
+
+    @patch("ui_backend.probe_video", return_value={"duration_seconds": 5.0, "width": 1536, "height": 864, "fps": 24})
     def test_candidate_selection_does_not_create_upscale(self, _probe):
         candidate_set = ui_backend.create_candidates_action(self.candidate_payload())
         self.complete_candidate_set(candidate_set)
@@ -136,6 +169,24 @@ class CandidatePipelineTest(unittest.TestCase):
         self.assertIsNone(selected.get("final_review_batch_id"))
         self.assertNotIn("queued_upscale_job_id", selected)
         self.assertEqual(len(list(self.jobs.iterdir())), 3)
+
+    @patch("ui_backend.probe_video", return_value={"duration_seconds": 5.0, "width": 1536, "height": 864, "fps": 24})
+    def test_select_multiple_candidates_keeps_primary(self, _probe):
+        candidate_set = ui_backend.create_candidates_action(self.candidate_payload())
+        self.complete_candidate_set(candidate_set)
+        selected_ids = candidate_set["candidate_job_ids"][:2]
+        selected = ui_backend.select_candidate_action(
+            {
+                "candidate_set_id": candidate_set["candidate_set_id"],
+                "job_ids": selected_ids,
+                "primary_job_id": selected_ids[1],
+            }
+        )
+        self.assertEqual(selected["selected_job_ids"], selected_ids)
+        self.assertEqual(selected["selected_job_id"], selected_ids[1])
+        for job_id in candidate_set["candidate_job_ids"]:
+            request = json.loads((self.jobs / job_id / "request.json").read_text())
+            self.assertEqual(request.get("candidate_selected"), job_id in selected_ids)
 
     @patch("ui_backend.probe_video", return_value={"duration_seconds": 5.0, "width": 1536, "height": 864, "fps": 24})
     def test_register_candidate_final_review_uses_selected_job(self, _probe):
@@ -238,19 +289,38 @@ class CandidatePipelineTest(unittest.TestCase):
             )
 
     @patch("ui_backend.probe_video", return_value={"duration_seconds": 5.0, "width": 1536, "height": 864, "fps": 24})
-    def test_candidate_gate_blocks_selection_until_all_batches_complete(self, _probe):
+    def test_candidate_gate_blocks_selection_until_own_batch_complete(self, _probe):
+        candidate_set = ui_backend.create_candidates_action(self.candidate_payload())
+        update_status(
+            self.jobs / candidate_set["candidate_job_ids"][0],
+            "running",
+            stage="ComfyUI 실행 중",
+        )
+        with self.assertRaisesRegex(RuntimeError, "모든 후보 생성|생성이 아직 진행 중"):
+            ui_backend.select_candidate_action(
+                {
+                    "candidate_set_id": candidate_set["candidate_set_id"],
+                    "job_id": candidate_set["candidate_job_ids"][1],
+                }
+            )
+
+    @patch("ui_backend.probe_video", return_value={"duration_seconds": 5.0, "width": 1536, "height": 864, "fps": 24})
+    def test_candidate_selection_allowed_while_other_batch_generates(self, _probe):
         first = ui_backend.create_candidates_action(self.candidate_payload())
         second_payload = self.candidate_payload()
         second_payload["seed"] = 200
-        second = ui_backend.create_candidates_action(second_payload)
+        ui_backend.create_candidates_action(second_payload)
         self.complete_candidate_set(first)
-        with self.assertRaisesRegex(RuntimeError, "모두 끝난 뒤"):
-            ui_backend.select_candidate_action(
-                {
-                    "candidate_set_id": first["candidate_set_id"],
-                    "job_id": first["candidate_job_ids"][0],
-                }
-            )
+        batch_manager.mark_batch_generation_complete(
+            self.root, batch_manager.load_batch(self.root, first["batch_id"])
+        )
+        selected = ui_backend.select_candidate_action(
+            {
+                "candidate_set_id": first["candidate_set_id"],
+                "job_id": first["candidate_job_ids"][0],
+            }
+        )
+        self.assertEqual(selected["selected_job_id"], first["candidate_job_ids"][0])
 
     @patch("ui_backend.probe_video", return_value={"duration_seconds": 5.0, "width": 1536, "height": 864, "fps": 24})
     def test_final_review_batch_advances_in_fifo_order(self, _probe):

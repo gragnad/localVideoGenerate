@@ -38,6 +38,20 @@ def job(job_id: str)->dict[str,Any]:
     if not d.is_dir(): raise FileNotFoundError(f"작업을 찾을 수 없습니다: {job_id}")
     return {"job_id":job_id,"dir":d,"request":read_json(d/"request.json",{}) or {},"manifest":read_json(d/"manifest.json",{}) or {},"status":read_json(d/"status.json",{}) or {}}
 
+def _is_candidate_generation_job(item: dict[str,Any]|None)->bool:
+    if not item:
+        return False
+    request=item.get("request") or {}
+    if str(request.get("job_type") or "generate")!="generate":
+        return False
+    if not request.get("candidate_set_id"):
+        return False
+    try:
+        index=int(request.get("candidate_index") or 0)
+    except (TypeError,ValueError):
+        return False
+    return index>0
+
 def root_for(item):
     root_id=str(item["request"].get("root_job_id") or item["manifest"].get("root_job_id") or item["job_id"])
     return job(root_id)
@@ -177,31 +191,82 @@ def create_candidates_action(data):
                  message=f"후보 영상 {count}개가 독립 배치에 등록되었습니다. 앞선 배치 뒤에 실행됩니다.")
     return payload
 
+def _candidate_generation_jobs_for_set(payload: dict[str,Any])->list[dict[str,Any]]:
+    candidate_set_id=str(payload.get("candidate_set_id") or "")
+    items=[]
+    for job_id in payload.get("candidate_job_ids") or []:
+        try:
+            item=job(job_id)
+        except FileNotFoundError:
+            continue
+        if _is_candidate_generation_job(item) and str(item["request"].get("candidate_set_id") or "")==candidate_set_id:
+            items.append(item)
+    return items
+
+def _candidate_set_batch_ready(payload: dict[str,Any])->None:
+    items=_candidate_generation_jobs_for_set(payload)
+    if not items:
+        return
+    if any(str(item["status"].get("status") or "") not in JOB_TERMINAL_STATUSES for item in items):
+        raise RuntimeError("모든 후보 생성이 끝난 뒤 선택할 수 있습니다.")
+
+def _selected_job_ids_from_payload(payload: dict[str,Any])->list[str]:
+    raw=payload.get("selected_job_ids")
+    if isinstance(raw,list):
+        ids=[str(item).strip() for item in raw if str(item).strip()]
+        if ids:
+            return ids
+    primary=str(payload.get("selected_job_id") or "").strip()
+    return [primary] if primary else []
+
 def select_candidate_action(data):
     candidate_set_id=str(data.get("candidate_set_id") or "").strip()
-    selected_job_id=str(data.get("job_id") or "").strip();payload=load_candidate_set(candidate_set_id)
-    active_batches=active_candidate_generation_batches()
-    if active_batches:
-        raise RuntimeError(f"등록된 후보 생성 배치 {len(active_batches)}개가 모두 끝난 뒤 선택할 수 있습니다.")
-    if selected_job_id not in payload.get("candidate_job_ids",[]):raise ValueError("해당 후보군에 속하지 않는 작업입니다.")
-    if payload.get("final_review_batch_id"):raise RuntimeError("검수가 등록된 후보군은 선택을 변경할 수 없습니다.")
-    items=[job(job_id) for job_id in payload.get("candidate_job_ids") or []]
+    payload=load_candidate_set(candidate_set_id)
+    _candidate_set_batch_ready(payload)
+    items=_candidate_generation_jobs_for_set(payload)
+    valid_ids={item["job_id"] for item in items}
+    if not valid_ids:
+        raise RuntimeError("선택 가능한 후보 작업이 없습니다.")
+    raw_ids=data.get("job_ids")
+    if isinstance(raw_ids,list) and raw_ids:
+        selected_job_ids=[str(item).strip() for item in raw_ids if str(item).strip()]
+    else:
+        single=str(data.get("job_id") or "").strip()
+        selected_job_ids=[single] if single else []
+    deduped=[]
+    for job_id in selected_job_ids:
+        if job_id and job_id not in deduped:
+            deduped.append(job_id)
+    selected_job_ids=deduped
+    if not selected_job_ids:
+        raise ValueError("선택할 후보를 한 개 이상 지정하세요.")
+    for selected_job_id in selected_job_ids:
+        if selected_job_id not in valid_ids:
+            raise ValueError("해당 후보군에 속하지 않는 작업입니다.")
+    if payload.get("final_review_batch_id"):
+        raise RuntimeError("검수가 등록된 후보군은 선택을 변경할 수 있습니다.")
     statuses={item["job_id"]:str(item["status"].get("status") or "") for item in items}
-    if any(status not in JOB_TERMINAL_STATUSES for status in statuses.values()):
-        raise RuntimeError("모든 후보 생성이 끝난 뒤 선택할 수 있습니다.")
-    if statuses.get(selected_job_id)!="completed":raise RuntimeError("완료된 후보만 선택할 수 있습니다.")
+    for selected_job_id in selected_job_ids:
+        if statuses.get(selected_job_id)!="completed":
+            raise RuntimeError("완료된 후보만 선택할 수 있습니다.")
+    primary_job_id=str(data.get("primary_job_id") or "").strip() or selected_job_ids[0]
+    if primary_job_id not in selected_job_ids:
+        raise ValueError("대표 후보는 선택 목록에 포함되어야 합니다.")
+    selected_set=set(selected_job_ids)
+    selected_item=job(primary_job_id)
     selected_at=now_iso()
     for item in items:
-        selected=item["job_id"]==selected_job_id
+        selected=item["job_id"] in selected_set
         for filename in ("request.json","manifest.json"):
             path=item["dir"]/filename;record=read_json(path,{}) or {};record.update(candidate_selected=selected,selected_at=selected_at if selected else None);atomic_write_json(path,record)
-    payload.update(status="selected",selected_job_id=selected_job_id,selected_at=selected_at)
+    payload.update(status="selected",selected_job_id=primary_job_id,selected_job_ids=selected_job_ids,selected_at=selected_at)
     save_candidate_set(payload)
-    selected_item=job(selected_job_id)
-    seed_library.mark_selected_final(ROOT,selected_job_id,selected_item["request"],selected_item["dir"])
+    seed_library.mark_selected_final(ROOT,primary_job_id,selected_item["request"],selected_item["dir"])
+    count=len(selected_job_ids)
+    summary=f"후보 {count}개 선택 · 대표 {primary_job_id}"
     update_batch(ROOT,str(payload["batch_id"]),status="candidate_selected",stage="user_candidate_selected",
-                 next_stage="final_review",selected_candidate_job_id=selected_job_id,
-                 message=f"최종 후보 {selected_job_id}가 선택되었습니다. 04 최종 마스터에서 AI 검수를 등록하세요.")
+                 next_stage="final_review",selected_candidate_job_id=primary_job_id,selected_candidate_job_ids=selected_job_ids,
+                 message=f"{summary}. 04 최종 마스터에서 AI 검수를 등록하세요.")
     return load_candidate_set(candidate_set_id)
 
 def source_video_path(item: dict[str,Any])->Path:
@@ -212,6 +277,15 @@ def source_video_path(item: dict[str,Any])->Path:
         if Path(str(descriptor.get("filename") or "")).suffix.lower() not in VIDEO_SUFFIXES:continue
         candidate=(COMFY_OUTPUT/str(descriptor.get("subfolder") or "")/str(descriptor.get("filename") or "")).resolve()
         if candidate.is_file() and COMFY_OUTPUT.resolve() in candidate.parents:return candidate
+    artifacts=item["dir"]/"artifacts"
+    if artifacts.is_dir():
+        for name in ("review_source_video.mp4","review_source_video.webm","review_source_video.mov","assembled_master.mp4"):
+            path=artifacts/name
+            if path.is_file():
+                return path
+        for path in sorted(artifacts.iterdir(), key=lambda x:x.name, reverse=True):
+            if path.is_file() and path.suffix.lower() in VIDEO_SUFFIXES:
+                return path
     raise FileNotFoundError(f"선택 후보의 로컬 영상 파일을 찾을 수 없습니다: {item['job_id']}")
 
 def composition_path(composition_id: str)->Path:
@@ -242,7 +316,7 @@ def list_compositions_action(_data=None)->dict[str,Any]:
 
 def _candidate_clip_item(item: dict[str,Any])->dict[str,Any]:
     request=item["request"];manifest=item["manifest"];status=item["status"]
-    if not request.get("candidate_set_id"):raise ValueError("후보 작업만 선택할 수 있습니다.")
+    if not _is_candidate_generation_job(item):raise ValueError("후보 생성 작업만 선택할 수 있습니다.")
     if str(status.get("status") or "")!="completed":raise ValueError("완료된 후보만 선택할 수 있습니다.")
     source_path=source_video_path(item)
     probe=probe_video(source_path)
@@ -259,6 +333,53 @@ def _candidate_clip_item(item: dict[str,Any])->dict[str,Any]:
             "source_path":str(source_path)}
 
 IMAGE_SUFFIXES={".png",".jpg",".jpeg",".webp"}
+PREVIEW_MAX_DIM_MIN=64
+PREVIEW_MAX_DIM_MAX=2048
+
+def resolve_job_source_image_path(job_id: str,index: int)->Path:
+    item=job(job_id)
+    root=root_for(item)
+    segments=list(root["request"].get("segments") or [])
+    if index<0 or index>=len(segments):
+        raise IndexError(f"원본 이미지 index가 범위를 벗어났습니다: {index}")
+    raw=segments[index]
+    source_root=(root["dir"]/"source_images").resolve()
+    image_path=Path(str(raw.get("source_path") or "")).resolve()
+    try:image_path.relative_to(source_root)
+    except ValueError as exc:
+        raise PermissionError("허용되지 않는 원본 이미지 경로입니다.") from exc
+    if image_path.suffix.lower() not in IMAGE_SUFFIXES or not image_path.is_file():
+        raise FileNotFoundError(f"원본 이미지를 찾을 수 없습니다: {job_id} [{index}]")
+    return image_path
+
+def ensure_source_image_preview(job_id: str,index: int,max_dim: int)->Path:
+    source=resolve_job_source_image_path(job_id,index)
+    if max_dim<=0:
+        return source
+    bounded=max(PREVIEW_MAX_DIM_MIN,min(PREVIEW_MAX_DIM_MAX,int(max_dim)))
+    item=job(job_id)
+    cache_dir=item["dir"]/"artifacts"
+    cache_dir.mkdir(parents=True,exist_ok=True)
+    cache_path=cache_dir/f"source_preview_{index}_{bounded}.jpg"
+    source_mtime=source.stat().st_mtime
+    if cache_path.is_file() and cache_path.stat().st_size>0 and cache_path.stat().st_mtime>=source_mtime:
+        return cache_path
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise RuntimeError("Pillow가 설치되어 있지 않아 미리보기를 생성할 수 없습니다.") from exc
+    with Image.open(source) as image:
+        preview=image.convert("RGB")
+        preview.thumbnail((bounded,bounded),Image.Resampling.LANCZOS)
+        preview.save(cache_path,"JPEG",quality=85,optimize=True)
+    return cache_path
+
+def source_image_preview_action(data)->dict[str,Any]:
+    job_id=str(data.get("job_id") or "").strip()
+    index=int(data.get("index") or 0)
+    max_dim=int(data.get("max") or 0)
+    path=ensure_source_image_preview(job_id,index,max_dim)
+    return {"path":str(path)}
 
 def _safe_job_source_path(path: Path)->bool:
     try:path.resolve().relative_to(JOBS.resolve())
@@ -326,7 +447,7 @@ def clip_library_action(_data=None)->dict[str,Any]:
     for directory in sorted(JOBS.iterdir(),key=lambda x:x.name,reverse=True):
         if not directory.is_dir():continue
         request=read_json(directory/"request.json",{}) or {}
-        if not request.get("candidate_set_id"):continue
+        if not _is_candidate_generation_job({"request":request}):continue
         status=read_json(directory/"status.json",{}) or {}
         if str(status.get("status") or "")!="completed":continue
         try:
@@ -832,6 +953,12 @@ def like_seed_action(data)->dict[str,Any]:
     entry=seed_library.like_seed_entry(ROOT,job_id,item["request"],item["dir"])
     return {"entry":entry,"liked":True,"job_id":job_id}
 
+def unlike_seed_action(data)->dict[str,Any]:
+    job_id=str(data.get("job_id") or "").strip()
+    result=seed_library.unlike_seed_entry(ROOT,job_id)
+    result["liked"]=False
+    return result
+
 def list_seed_library_action(_data=None)->dict[str,Any]:
     return seed_library.list_seed_library(ROOT)
 
@@ -844,6 +971,6 @@ def delete_seed_library_action(data)->dict[str,Any]:
 
 def main():
     action=sys.argv[1]; data=json.load(sys.stdin)
-    out={"prompt":prompt_action,"create":create_action,"create_candidates":create_candidates_action,"select_candidate":select_candidate_action,"manual":manual_action,"clip_library":clip_library_action,"source_image_library":source_image_library_action,"source_image_file":source_image_file_action,"delete_source_image":delete_source_image_action,"like_seed":like_seed_action,"list_seed_library":list_seed_library_action,"recommend_seeds":recommend_seeds_action,"delete_seed_library":delete_seed_library_action,"list_compositions":list_compositions_action,"create_composition":create_composition_action,"update_composition":update_composition_action,"assemble_composition":assemble_composition_action,"import_composition_video":import_composition_video_action,"register_candidate_final_review":register_candidate_final_review_action,"register_composition_final_review":register_composition_final_review_action,"delete_composition":delete_composition_action,"delete_candidate_set":delete_candidate_set_action,"delete_lineage":delete_lineage_action,"delete_queued_job":delete_queued_job_action,"force_cancel_batch":force_cancel_batch_action,"delete_batch_history":delete_batch_history_action,"settings":lambda d:save_automation_settings(ROOT,d)}[action](data)
+    out={"prompt":prompt_action,"create":create_action,"create_candidates":create_candidates_action,"select_candidate":select_candidate_action,"manual":manual_action,"clip_library":clip_library_action,"source_image_library":source_image_library_action,"source_image_file":source_image_file_action,"source_image_preview":source_image_preview_action,"delete_source_image":delete_source_image_action,"like_seed":like_seed_action,"unlike_seed":unlike_seed_action,"list_seed_library":list_seed_library_action,"recommend_seeds":recommend_seeds_action,"delete_seed_library":delete_seed_library_action,"list_compositions":list_compositions_action,"create_composition":create_composition_action,"update_composition":update_composition_action,"assemble_composition":assemble_composition_action,"import_composition_video":import_composition_video_action,"register_candidate_final_review":register_candidate_final_review_action,"register_composition_final_review":register_composition_final_review_action,"delete_composition":delete_composition_action,"delete_candidate_set":delete_candidate_set_action,"delete_lineage":delete_lineage_action,"delete_queued_job":delete_queued_job_action,"force_cancel_batch":force_cancel_batch_action,"delete_batch_history":delete_batch_history_action,"settings":lambda d:save_automation_settings(ROOT,d)}[action](data)
     print(json.dumps(out,ensure_ascii=False))
 if __name__=="__main__":main()

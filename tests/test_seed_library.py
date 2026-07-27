@@ -116,6 +116,19 @@ class SeedLibraryTest(unittest.TestCase):
         self.assertEqual(result["recommendations"][0]["video_noise_seed"], 1001)
         self.assertGreater(result["recommendations"][0]["score"], 0)
 
+    def test_unlike_seed_removes_like_only_entry(self):
+        created = ui_backend.create_action({**self.create_payload(seed=1001), "seed_input": 1001})
+        job_id = created["job_id"]
+        job_dir = self.jobs / job_id
+        request = json.loads((job_dir / "request.json").read_text())
+        seed_library.like_seed_entry(self.root, job_id, request, job_dir)
+        self.assertEqual(len(seed_library.list_entries(self.root)), 1)
+
+        unlike = seed_library.unlike_seed_entry(self.root, job_id)
+        self.assertFalse(unlike["liked"])
+        self.assertTrue(unlike["deleted"])
+        self.assertEqual(len(seed_library.list_entries(self.root)), 0)
+
     def test_tokenize_prompt_deduplicates_stopwords(self):
         tokens = seed_library.tokenize_prompt("Project style ocean ocean mir")
         self.assertIn("ocean", tokens)

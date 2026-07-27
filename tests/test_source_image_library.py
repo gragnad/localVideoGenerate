@@ -92,6 +92,29 @@ class SourceImageLibraryTest(unittest.TestCase):
             self.assertFalse(path.exists())
         self.assertEqual(ui_backend.source_image_library_action({})["images"], [])
 
+    def test_source_image_preview_creates_cached_jpeg(self):
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow not installed")
+        import io
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (800, 450), color=(20, 40, 80)).save(buffer, format="PNG")
+        data = buffer.getvalue()
+        self.write_job("job_thumb", "scene.png", data, "2026-07-27T12:00:00+09:00")
+
+        out = ui_backend.source_image_preview_action(
+            {"job_id": "job_thumb", "index": 0, "max": 320}
+        )
+        preview = Path(out["path"])
+
+        self.assertTrue(preview.is_file())
+        self.assertEqual(preview.suffix, ".jpg")
+        self.assertLess(preview.stat().st_size, len(data))
+        with Image.open(preview) as image:
+            self.assertLessEqual(max(image.size), 320)
+
 
 if __name__ == "__main__":
     unittest.main()
