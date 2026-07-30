@@ -1,14 +1,21 @@
 from __future__ import annotations
 
-import hashlib, hmac, json, os, secrets, shutil, subprocess, sys
+import copy, hashlib, hmac, json, os, secrets, shutil, subprocess, sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import candidate_set_status
 import correction_policy
+import director_prompt_projects
+import director_prompt_overview
+import director_prompt_uploads
+from comfy_workflow_export import graph_to_api
 from batch_manager import attach_job_to_batch, clear_open_batch_pointer, create_new_open_batch, find_batches_by_status, get_or_create_open_batch, load_batch, load_automation_settings, save_automation_settings, update_batch
 from job_queue import atomic_write_json, now_iso, queue_claim_lock, read_json, update_status
 from video_assembler import VideoAssemblerError, assemble_clips, probe_video
+import msr_prompt_projects
+import msr_sequence_v2
 import seed_library
 from workflow_builder import KOREAN_SPEECH_POLICY, resolve_seed, sanitize_token
 
@@ -18,6 +25,7 @@ JOBS=ROOT/"jobs"
 WF_DIR=Path(os.environ.get("COMFY_WORKFLOW_DIR", HOME/"ai-workspace/apps/ComfyUI/user/default/workflows")).expanduser()
 CR=WF_DIR/"(CR)LTX_Director_2_API.json"
 MD=WF_DIR/"(MD)LTX_Retake_Partial_API.json"
+MSR_GRAPH=WF_DIR/"LTX-2.3_MSR_sample_workflow_V2+multiGuide.json"
 VIDEO_SUFFIXES={".mp4",".webm",".mov",".mkv",".avi"}
 COMFY_ROOT=Path(os.environ.get("COMFY_ROOT", HOME/"ai-workspace/apps/ComfyUI")).expanduser()
 COMFY_OUTPUT=Path(os.environ.get("COMFY_OUTPUT_DIR", COMFY_ROOT/"output")).expanduser()
@@ -137,6 +145,120 @@ def create_action(data, target_batch_id: str | None = None):
     atomic_write_json(d/"request.json",req);atomic_write_json(d/"manifest.json",man);attach_job_to_batch(ROOT,batch_id,jid,"candidate" if candidate_set_id else "generate");update_status(d,"queued",stage="후보 생성 worker 대기" if candidate_set_id else "worker 대기",message="후보 작업 큐에 등록되었습니다." if candidate_set_id else "작업 큐에 등록되었습니다.",progress=0,created_at=created)
     return {"job_id":jid,"batch_id":batch_id}
 
+def _msr_api_template(reference_count_or_slots: int | list[int] | set[int])->dict[str,Any]:
+    if not MSR_GRAPH.is_file():
+        raise FileNotFoundError(f"MSR V2 샘플 워크플로를 찾을 수 없습니다: {MSR_GRAPH}")
+    if isinstance(reference_count_or_slots,int):
+        slots=set(range(1,reference_count_or_slots+1))
+    else:
+        slots={int(value) for value in reference_count_or_slots}
+    graph=json.loads(MSR_GRAPH.read_text(encoding="utf-8"))
+    for node in graph.get("nodes") or []:
+        if int(node.get("id") or 0)==196:node["mode"]=0 if 3 in slots else 4
+        elif int(node.get("id") or 0)==201:node["mode"]=0 if 4 in slots else 4
+    return graph_to_api(graph)
+
+
+def create_msr_action(data, target_batch_id: str):
+    references=[row for row in data.get("references") or [] if row.get("upload_path") or row.get("source_path")]
+    if not 1<=len(references)<=4:raise ValueError("MSR V2 참조 이미지는 1~4장이어야 합니다.")
+    background=dict(data.get("background") or {})
+    if not background.get("upload_path") and not background.get("source_path"):raise ValueError("MSR V2 배경 이미지를 선택하세요.")
+    relay_segments=[dict(row) for row in data.get("relay_segments") or []]
+    if not relay_segments or any(not str(row.get("prompt") or "").strip() for row in relay_segments):
+        raise ValueError("프롬프트 릴레이 구간을 한 개 이상 입력하세요.")
+    if any(float(row.get("seconds") or 0)<=0 for row in relay_segments):raise ValueError("릴레이 구간 시간은 0초보다 커야 합니다.")
+    batch=load_batch(ROOT,target_batch_id)
+    if not batch or batch.get("status")!="open" or bool(batch.get("registration_closed")):
+        raise RuntimeError(f"후보 작업을 등록할 수 없는 배치입니다: {target_batch_id}")
+    name=str(data.get("job_name") or "MSR_v2_scene");token=sanitize_token(name,fallback="MSR_v2_scene")
+    jid=f"{datetime.now():%Y%m%d_%H%M%S}_{token}_{secrets.token_hex(2)}";d=JOBS/jid;src=d/"source_images";src.mkdir(parents=True)
+    copied=[]
+    for index,(role,row) in enumerate([(f"subject_{i}",row) for i,row in enumerate(references,1)]+[("background",background)],1):
+        incoming=msr_prompt_projects.resolve_msr_upload_path(ROOT,row);raw=incoming.read_bytes();stored=safe_name(str(row.get("original_name") or incoming.name),raw,index);dest=src/stored;shutil.copy2(incoming,dest)
+        copied.append({"role":role,"original_name":str(row.get("original_name") or incoming.name),"stored_name":stored,"source_path":str(dest),"sha256":hashlib.sha256(raw).hexdigest(),"description":str(row.get("description") or "").strip(),"prompt":str(row.get("description") or role),"seconds":0,"order":index})
+    snap=d/"selected_workflow_api.json";atomic_write_json(snap,_msr_api_template(len(references)))
+    seed,raw_seed,seed_mode=resolve_video_seed(data);created=now_iso();width=int(data.get("width") or 1280);height=int(data.get("height") or 704)
+    req={"schema_version":2,"job_type":"generate","pipeline_stage":"initial_generation","job_id":jid,"batch_id":target_batch_id,"job_dir":str(d),"created_at":created,"job_name":name,"template_path":str(snap),"workflow_source_path":str(MSR_GRAPH),"workflow_filename":MSR_GRAPH.name,"workflow_kind":"msr_v2","workflow_kind_label":"후보 생성 (MSR V2)","comfy_url":os.environ.get("COMFY_URL","http://127.0.0.1:8188"),"comfy_public_url":os.environ.get("COMFY_PUBLIC_URL",""),"comfy_start_script":os.environ.get("COMFY_START_SCRIPT",str(HOME/"bin/ai-start-comfy")),"comfy_start_timeout":float(os.environ.get("COMFY_START_TIMEOUT","180")),"auto_start_comfy":True,"fps":24,"seed":seed,"seed_input":raw_seed,"seed_mode":seed_mode,"resolution":{"width":width,"height":height,"label":f"{width} × {height}"},"global_prompt":str(data.get("global_prompt") or DEFAULT_GLOBAL).strip(),"filename_prefix":f"video/jobs/{jid}/{token}","segments":copied,"msr_references":[row for row in copied if row["role"]!="background"],"msr_background":next(row for row in copied if row["role"]=="background"),"relay_segments":relay_segments,"relay_epsilon":float(data.get("epsilon") or 0.0011),"msr_reference_frame_count":65,"parent_job_id":None,"attempt":0,"automation":dict(batch.get("automation") or load_automation_settings(ROOT)),"candidate_set_id":str(data["candidate_set_id"]),"candidate_index":int(data["candidate_index"]),"candidate_count":int(data["candidate_count"]),"review_policy":"user_candidate_selection"}
+    man={k:req[k] for k in ("schema_version","job_id","batch_id","job_type","pipeline_stage","created_at","workflow_source_path","workflow_filename","workflow_kind","workflow_kind_label","seed","resolution","fps","segments","candidate_set_id","candidate_index","candidate_count","review_policy")};man.update(status="queued",outputs=[])
+    atomic_write_json(d/"request.json",req);atomic_write_json(d/"manifest.json",man);attach_job_to_batch(ROOT,target_batch_id,jid,"candidate");update_status(d,"queued",stage="MSR V2 후보 생성 worker 대기",message="MSR V2 후보 작업이 큐에 등록되었습니다.",progress=0,created_at=created)
+    return {"job_id":jid,"batch_id":target_batch_id}
+
+
+def create_msr_candidates_action(data):
+    count=int(data.get("candidate_count") or 3)
+    if count<2 or count>8:raise ValueError("후보 개수는 2~8개여야 합니다.")
+    prompt_project_id=str(data.get("prompt_project_id") or "").strip()
+    prompt_clip_id=str(data.get("prompt_clip_id") or "").strip()
+    if prompt_project_id or prompt_clip_id:
+        if not prompt_project_id or not prompt_clip_id:
+            raise ValueError("prompt_project_id와 prompt_clip_id를 함께 지정해야 합니다.")
+        prompt_clip=msr_prompt_projects.get_prompt_project_clip_action(
+            ROOT,{"project_id":prompt_project_id,"clip_id":prompt_clip_id}
+        )
+        if not prompt_clip.get("can_register_msr"):
+            reason=str(prompt_clip.get("registration_block_reason") or "프롬프트 검수가 완료되지 않았습니다.")
+            raise ValueError(f"MSR 후보 등록이 차단되었습니다: {reason}")
+    candidate_set_id=f"cset_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(2)}";raw_seed=int(data.get("seed",-1));modulus=(1<<63)-1
+    settings=load_automation_settings(ROOT);batch=create_new_open_batch(ROOT,settings);batch_id=str(batch["batch_id"]);created=now_iso();jobs=[]
+    update_batch(ROOT,batch_id,candidate_set_ids=[candidate_set_id],batch_mode="candidate_selection",registration_closed=False,message=f"MSR V2 후보 영상 {count}개를 등록하고 있습니다.")
+    for index in range(1,count+1):
+        item=copy.deepcopy(data);candidate_seed=resolve_seed(-1) if raw_seed<0 else (raw_seed+index-1)%modulus
+        item.update(candidate_set_id=candidate_set_id,candidate_index=index,candidate_count=count,seed=candidate_seed,seed_input=raw_seed)
+        jobs.append(create_msr_action(item,batch_id))
+    payload=save_candidate_set({"schema_version":1,"candidate_set_id":candidate_set_id,"generation_mode":"msr_v2","status":"generating","created_at":created,"batch_id":batch_id,"candidate_count":count,"candidate_job_ids":[item["job_id"] for item in jobs],"selected_job_id":None,"final_review_batch_id":None})
+    update_batch(ROOT,batch_id,registration_closed=True,registration_closed_at=now_iso(),stage="candidate_jobs_queued",next_stage="generation",message=f"MSR V2 후보 영상 {count}개가 등록되었습니다. 앞선 배치 뒤에 실행됩니다.")
+    return payload
+
+
+def create_msr_sequence_action(data: dict[str,Any], target_batch_id: str):
+    normalized=msr_sequence_v2.validate_submission(data)
+    references=list(normalized["references"])
+    anchor=dict(normalized["anchor"])
+    batch=load_batch(ROOT,target_batch_id)
+    if not batch or batch.get("status")!="open" or bool(batch.get("registration_closed")):
+        raise RuntimeError(f"후보 작업을 등록할 수 없는 배치입니다: {target_batch_id}")
+    name=str(normalized.get("job_name") or "MSR_sequence");token=sanitize_token(name,fallback="MSR_sequence")
+    jid=f"{datetime.now():%Y%m%d_%H%M%S}_{token}_{secrets.token_hex(2)}";d=JOBS/jid;src=d/"source_images";src.mkdir(parents=True)
+    copied=[]
+    rows=[(str(row["role"]),row) for row in references]+[("anchor",anchor)]
+    for index,(role,row) in enumerate(rows,1):
+        incoming=msr_prompt_projects.resolve_msr_upload_path(ROOT,row);raw=incoming.read_bytes();stored=safe_name(str(row.get("original_name") or incoming.name),raw,index);dest=src/stored;shutil.copy2(incoming,dest)
+        copied.append({"role":role,"slot":row.get("slot"),"reference_id":row.get("reference_id"),"original_name":str(row.get("original_name") or incoming.name),"stored_name":stored,"source_path":str(dest),"sha256":hashlib.sha256(raw).hexdigest(),"description":str(row.get("description") or "").strip(),"prompt":str(row.get("description") or role),"seconds":0,"order":index})
+    slots=[int(row["slot"]) for row in references]
+    snap=d/"selected_workflow_api.json";atomic_write_json(snap,_msr_api_template(slots))
+    seed,raw_seed,seed_mode=resolve_video_seed(normalized);created=now_iso();width=int(normalized.get("width") or 1280);height=int(normalized.get("height") or 704)
+    ref_rows=[row for row in copied if row["role"]!="anchor"];anchor_row=next(row for row in copied if row["role"]=="anchor")
+    req={"schema_version":3,"workflow":"msr_sequence_v2","prompt_strategy":"msr_continuity_v1","director_prompt_inheritance":False,"job_type":"generate","pipeline_stage":"initial_generation","job_id":jid,"batch_id":target_batch_id,"job_dir":str(d),"created_at":created,"job_name":name,"template_path":str(snap),"workflow_source_path":str(MSR_GRAPH),"workflow_filename":MSR_GRAPH.name,"workflow_kind":"msr_sequence_v2","workflow_kind_label":"연속 구간 후보 생성 (MSR V2)","comfy_url":os.environ.get("COMFY_URL","http://127.0.0.1:8188"),"comfy_public_url":os.environ.get("COMFY_PUBLIC_URL",""),"comfy_start_script":os.environ.get("COMFY_START_SCRIPT",str(HOME/"bin/ai-start-comfy")),"comfy_start_timeout":float(os.environ.get("COMFY_START_TIMEOUT","180")),"auto_start_comfy":True,"fps":24,"seed":seed,"seed_input":raw_seed,"seed_mode":seed_mode,"resolution":{"width":width,"height":height,"label":f"{width} × {height}"},"world_prompt":normalized["world_prompt"],"global_prompt":normalized["global_prompt"],"filename_prefix":f"video/jobs/{jid}/{token}","segments":copied,"msr_references":ref_rows,"msr_anchor":anchor_row,"msr_background":anchor_row,"relay_segments":normalized["relay_segments"],"requested_seconds":normalized["requested_seconds"],"maximum_duration_seconds":20.0,"continuity_mode":normalized["continuity_mode"],"source_scene_refs":normalized["source_scene_refs"],"relay_epsilon":float(normalized.get("epsilon") or 0.0011),"msr_reference_frame_count":65,"parent_job_id":None,"attempt":0,"automation":dict(batch.get("automation") or load_automation_settings(ROOT)),"candidate_set_id":str(normalized["candidate_set_id"]),"candidate_index":int(normalized["candidate_index"]),"candidate_count":int(normalized["candidate_count"]),"review_policy":"user_candidate_selection"}
+    man={k:req[k] for k in ("schema_version","workflow","prompt_strategy","director_prompt_inheritance","job_id","batch_id","job_type","pipeline_stage","created_at","workflow_source_path","workflow_filename","workflow_kind","workflow_kind_label","seed","resolution","fps","segments","candidate_set_id","candidate_index","candidate_count","review_policy")};man.update(status="queued",outputs=[])
+    atomic_write_json(d/"request.json",req);atomic_write_json(d/"manifest.json",man);attach_job_to_batch(ROOT,target_batch_id,jid,"candidate");update_status(d,"queued",stage="MSR 연속 구간 후보 생성 worker 대기",message="새 MSR 연속 생성 후보가 큐에 등록되었습니다.",progress=0,created_at=created)
+    return {"job_id":jid,"batch_id":target_batch_id}
+
+
+def create_msr_sequence_candidates_action(data: dict[str,Any]):
+    normalized=msr_sequence_v2.validate_submission(data)
+    count=int(normalized.get("candidate_count") or 3)
+    if count<2 or count>8:raise ValueError("후보 개수는 2~8개여야 합니다.")
+    prompt_project_id=str(normalized.get("prompt_project_id") or "").strip();prompt_clip_id=str(normalized.get("prompt_clip_id") or "").strip()
+    if prompt_project_id or prompt_clip_id:
+        if not prompt_project_id or not prompt_clip_id:raise ValueError("prompt_project_id와 prompt_clip_id를 함께 지정해야 합니다.")
+        prompt_clip=msr_prompt_projects.get_prompt_project_clip_action(ROOT,{"project_id":prompt_project_id,"clip_id":prompt_clip_id})
+        machine=prompt_clip.get("machine_payload") or {}
+        if machine.get("workflow")!="msr_sequence_v2" or machine.get("prompt_strategy")!="msr_continuity_v1":
+            raise ValueError("기존 Director/MSR 프롬프트 프로젝트는 새 MSR 연속 생성에 사용할 수 없습니다.")
+        if not prompt_clip.get("can_register_msr"):raise ValueError(f"MSR 후보 등록이 차단되었습니다: {prompt_clip.get('registration_block_reason') or '검수가 완료되지 않았습니다.'}")
+    candidate_set_id=f"cset_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(2)}";raw_seed=int(normalized.get("seed",-1));modulus=(1<<63)-1
+    settings=load_automation_settings(ROOT);batch=create_new_open_batch(ROOT,settings);batch_id=str(batch["batch_id"]);created=now_iso();jobs=[]
+    update_batch(ROOT,batch_id,candidate_set_ids=[candidate_set_id],batch_mode="candidate_selection",registration_closed=False,message=f"새 MSR 연속 구간 후보 {count}개를 등록하고 있습니다.")
+    for index in range(1,count+1):
+        item=copy.deepcopy(normalized);candidate_seed=resolve_seed(-1) if raw_seed<0 else (raw_seed+index-1)%modulus
+        item.update(candidate_set_id=candidate_set_id,candidate_index=index,candidate_count=count,seed=candidate_seed,seed_input=raw_seed)
+        jobs.append(create_msr_sequence_action(item,batch_id))
+    payload=save_candidate_set({"schema_version":2,"candidate_set_id":candidate_set_id,"generation_mode":"msr_sequence_v2","prompt_strategy":"msr_continuity_v1","status":"generating","created_at":created,"batch_id":batch_id,"candidate_count":count,"candidate_job_ids":[item["job_id"] for item in jobs],"selected_job_id":None,"final_review_batch_id":None})
+    update_batch(ROOT,batch_id,registration_closed=True,registration_closed_at=now_iso(),stage="candidate_jobs_queued",next_stage="generation",message=f"새 MSR 연속 구간 후보 {count}개가 등록되었습니다. 앞선 배치 뒤에 실행됩니다.")
+    return payload
+
+
 def candidate_set_path(candidate_set_id: str)->Path:
     if not candidate_set_id or Path(candidate_set_id).name!=candidate_set_id or candidate_set_id in {".",".."}:
         raise ValueError("허용되지 않는 후보군 ID입니다.")
@@ -150,6 +272,18 @@ def load_candidate_set(candidate_set_id: str)->dict[str,Any]:
 def save_candidate_set(payload: dict[str,Any])->dict[str,Any]:
     path=candidate_set_path(str(payload["candidate_set_id"]));path.parent.mkdir(parents=True,exist_ok=True)
     payload["updated_at"]=now_iso();atomic_write_json(path,payload);return payload
+
+def sync_candidate_sets_action(data):
+    candidate_set_id=str(data.get("candidate_set_id") or "").strip()
+    payloads=candidate_set_status.reconcile_candidate_sets(
+        ROOT,[candidate_set_id] if candidate_set_id else None
+    )
+    return {
+        "synced_count":len(payloads),
+        "statuses":{
+            str(item["candidate_set_id"]):str(item["status"]) for item in payloads
+        },
+    }
 
 def active_candidate_generation_batches()->list[dict[str,Any]]:
     return [
@@ -969,8 +1103,95 @@ def recommend_seeds_action(data)->dict[str,Any]:
 def delete_seed_library_action(data)->dict[str,Any]:
     return seed_library.delete_seed_entry(ROOT,str(data.get("entry_id") or ""))
 
+def _is_msr_sequence_payload(payload: dict[str,Any])->bool:
+    return payload.get("workflow")==msr_sequence_v2.WORKFLOW and payload.get("prompt_strategy")==msr_sequence_v2.PROMPT_STRATEGY and payload.get("director_prompt_inheritance") is False
+
+
+def list_msr_sequence_projects_action(_data=None)->dict[str,Any]:
+    projects=[]
+    for project in msr_prompt_projects.list_prompt_projects_action(ROOT,_data).get("projects") or []:
+        project_id=str(project.get("project_id") or "")
+        clips=list_msr_sequence_project_clips_action({"project_id":project_id}).get("clips") or []
+        if not clips:continue
+        projects.append({**project,"clip_count":len(clips),"reviewed_count":sum(1 for item in clips if item.get("status")=="reviewed"),"needs_confirmation_count":sum(1 for item in clips if item.get("status")=="needs_confirmation"),"awaiting_background_count":sum(1 for item in clips if item.get("status")=="awaiting_background")})
+    return {"projects":projects,"workflow":msr_sequence_v2.WORKFLOW,"prompt_strategy":msr_sequence_v2.PROMPT_STRATEGY}
+
+
+def list_msr_sequence_project_clips_action(data)->dict[str,Any]:
+    project_id=str(data.get("project_id") or "")
+    compatible=[]
+    for clip in msr_prompt_projects.list_prompt_project_clips_action(ROOT,data).get("clips") or []:
+        try:detail=msr_prompt_projects.get_prompt_project_clip_action(ROOT,{"project_id":project_id,"clip_id":clip["clip_id"]})
+        except Exception:continue
+        if _is_msr_sequence_payload(detail.get("machine_payload") or {}):compatible.append(clip)
+    return {"project_id":project_id,"clips":compatible,"workflow":msr_sequence_v2.WORKFLOW,"prompt_strategy":msr_sequence_v2.PROMPT_STRATEGY}
+
+
+def get_msr_sequence_project_clip_action(data)->dict[str,Any]:
+    detail=msr_prompt_projects.get_prompt_project_clip_action(ROOT,data)
+    if not _is_msr_sequence_payload(detail.get("machine_payload") or {}):
+        raise ValueError("기존 Director/MSR 프롬프트는 새 MSR 연속 생성에서 조회할 수 없습니다.")
+    return detail
+
+
+def list_msr_prompt_projects_action(_data=None)->dict[str,Any]:
+    return msr_prompt_projects.list_prompt_projects_action(ROOT,_data)
+
+def list_msr_prompt_project_clips_action(data)->dict[str,Any]:
+    return msr_prompt_projects.list_prompt_project_clips_action(ROOT,data)
+
+def get_msr_prompt_project_clip_action(data)->dict[str,Any]:
+    return msr_prompt_projects.get_prompt_project_clip_action(ROOT,data)
+
+def msr_prompt_asset_action(data)->dict[str,Any]:
+    return msr_prompt_projects.resolve_prompt_asset_action(ROOT,data)
+
+def list_director_prompt_projects_action(_data=None)->dict[str,Any]:
+    return director_prompt_projects.list_projects_action(ROOT,_data)
+
+def list_director_prompt_project_clips_action(data)->dict[str,Any]:
+    return director_prompt_projects.list_clips_action(ROOT,data)
+
+def get_director_prompt_project_overview_action(data)->dict[str,Any]:
+    return director_prompt_overview.project_overview_action(ROOT,data)
+
+def get_director_prompt_project_clip_action(data)->dict[str,Any]:
+    return director_prompt_projects.get_clip_action(ROOT,data)
+
+def director_prompt_asset_action(data)->dict[str,Any]:
+    return director_prompt_projects.resolve_asset_action(ROOT,data)
+
+def save_director_prompt_segment_image_action(data)->dict[str,Any]:
+    return director_prompt_uploads.save_segment_image_action(ROOT,data)
+
+def review_director_prompt_segment_image_action(data)->dict[str,Any]:
+    return director_prompt_uploads.review_segment_image_action(ROOT,data)
+
+def list_msr_prompt_backgrounds_action(data)->dict[str,Any]:
+    return msr_prompt_projects.list_project_backgrounds_action(ROOT,data)
+
+def save_msr_prompt_background_link_action(data)->dict[str,Any]:
+    return msr_prompt_projects.save_background_link_action(ROOT,data)
+
 def main():
     action=sys.argv[1]; data=json.load(sys.stdin)
-    out={"prompt":prompt_action,"create":create_action,"create_candidates":create_candidates_action,"select_candidate":select_candidate_action,"manual":manual_action,"clip_library":clip_library_action,"source_image_library":source_image_library_action,"source_image_file":source_image_file_action,"source_image_preview":source_image_preview_action,"delete_source_image":delete_source_image_action,"like_seed":like_seed_action,"unlike_seed":unlike_seed_action,"list_seed_library":list_seed_library_action,"recommend_seeds":recommend_seeds_action,"delete_seed_library":delete_seed_library_action,"list_compositions":list_compositions_action,"create_composition":create_composition_action,"update_composition":update_composition_action,"assemble_composition":assemble_composition_action,"import_composition_video":import_composition_video_action,"register_candidate_final_review":register_candidate_final_review_action,"register_composition_final_review":register_composition_final_review_action,"delete_composition":delete_composition_action,"delete_candidate_set":delete_candidate_set_action,"delete_lineage":delete_lineage_action,"delete_queued_job":delete_queued_job_action,"force_cancel_batch":force_cancel_batch_action,"delete_batch_history":delete_batch_history_action,"settings":lambda d:save_automation_settings(ROOT,d)}[action](data)
+    director_actions={
+        "list_director_prompt_projects":list_director_prompt_projects_action,
+        "list_director_prompt_project_clips":list_director_prompt_project_clips_action,
+        "get_director_prompt_project_overview":get_director_prompt_project_overview_action,
+        "get_director_prompt_project_clip":get_director_prompt_project_clip_action,
+        "director_prompt_asset":director_prompt_asset_action,
+        "save_director_prompt_segment_image":save_director_prompt_segment_image_action,
+        "review_director_prompt_segment_image":review_director_prompt_segment_image_action,
+    }
+    if action in director_actions:
+        out=director_actions[action](data)
+        print(json.dumps(out,ensure_ascii=False))
+        return
+    if action=="sync_candidate_sets":
+        out=sync_candidate_sets_action(data)
+        print(json.dumps(out,ensure_ascii=False))
+        return
+    out={"prompt":prompt_action,"create":create_action,"create_candidates":create_candidates_action,"create_msr_candidates":create_msr_candidates_action,"create_msr_sequence_candidates":create_msr_sequence_candidates_action,"select_candidate":select_candidate_action,"manual":manual_action,"clip_library":clip_library_action,"source_image_library":source_image_library_action,"source_image_file":source_image_file_action,"source_image_preview":source_image_preview_action,"delete_source_image":delete_source_image_action,"like_seed":like_seed_action,"unlike_seed":unlike_seed_action,"list_seed_library":list_seed_library_action,"recommend_seeds":recommend_seeds_action,"delete_seed_library":delete_seed_library_action,"list_compositions":list_compositions_action,"create_composition":create_composition_action,"update_composition":update_composition_action,"assemble_composition":assemble_composition_action,"import_composition_video":import_composition_video_action,"register_candidate_final_review":register_candidate_final_review_action,"register_composition_final_review":register_composition_final_review_action,"delete_composition":delete_composition_action,"delete_candidate_set":delete_candidate_set_action,"delete_lineage":delete_lineage_action,"delete_queued_job":delete_queued_job_action,"force_cancel_batch":force_cancel_batch_action,"delete_batch_history":delete_batch_history_action,"list_msr_sequence_projects":list_msr_sequence_projects_action,"list_msr_sequence_project_clips":list_msr_sequence_project_clips_action,"get_msr_sequence_project_clip":get_msr_sequence_project_clip_action,"list_msr_prompt_projects":list_msr_prompt_projects_action,"list_msr_prompt_project_clips":list_msr_prompt_project_clips_action,"get_msr_prompt_project_clip":get_msr_prompt_project_clip_action,"msr_prompt_asset":msr_prompt_asset_action,"list_msr_prompt_backgrounds":list_msr_prompt_backgrounds_action,"save_msr_prompt_background_link":save_msr_prompt_background_link_action,"settings":lambda d:save_automation_settings(ROOT,d)}[action](data)
     print(json.dumps(out,ensure_ascii=False))
 if __name__=="__main__":main()

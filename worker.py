@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import candidate_set_status
 from batch_manager import (
     attach_job_to_batch,
     batch_generation_is_terminal,
@@ -41,7 +42,7 @@ from review_workflow import (
 )
 from vllm_reviewer import review_video
 from video_assembler import assemble_clips
-from workflow_builder import SegmentSpec, build_retake_workflow, build_workflow
+from workflow_builder import SegmentSpec, build_msr_v2_workflow, build_retake_workflow, build_workflow
 
 
 HOME = Path.home()
@@ -253,6 +254,7 @@ def process_generate_job(job_dir: Path) -> None:
                 "original_name": segment.get("original_name"),
                 "stored_name": stored_name,
                 "sha256": hashlib.sha256(content).hexdigest(),
+                "role": segment.get("role"),
                 "comfy_response": result,
             }
         )
@@ -298,33 +300,67 @@ def process_generate_job(job_dir: Path) -> None:
     )
     width = int(request["resolution"]["width"])
     height = int(request["resolution"]["height"])
-    common_build_args = {
-        "template": template,
-        "segments": segment_specs,
-        "global_prompt": str(request["global_prompt"]),
-        "fps": int(request["fps"]),
-        "seed": int(request["seed"]),
-        "filename_prefix": str(request["filename_prefix"]),
-        "target_total_seconds": request.get("target_total_seconds"),
-        "width": width,
-        "height": height,
-    }
-    if retake_video_upload is not None:
-        workflow, summary = build_retake_workflow(
-            **common_build_args,
-            retake_video_name=str(retake_video_upload["name"]),
-            retake_video_subfolder=str(retake_video_upload["subfolder"]),
-            retake_video_size_bytes=retake_video_size,
-            retake_video_duration_seconds=float(
-                request.get("retake_source_duration_seconds") or 0.0
-            ),
-            retake_start_seconds=float(request["retake_start_seconds"]),
-            retake_end_seconds=float(request["retake_end_seconds"]),
-            retake_prompt=str(request["retake_corrections"]),
-            retake_strength=float(request.get("retake_strength", 1.0)),
+    if str(request.get("workflow_kind") or "") in {"msr_v2", "msr_sequence_v2"}:
+        uploads_by_role = {
+            str(record.get("role") or ""): record["comfy_response"]
+            for record in upload_records
+        }
+        role_slots = {
+            "subject_1": 1, "subject_2": 2, "subject_3": 3, "subject_4": 4,
+            "character_1": 1, "character_2": 2, "prop_3": 3, "prop_4": 4,
+        }
+        references = [
+            {**uploads_by_role[role], "slot": slot}
+            for role, slot in role_slots.items()
+            if role in uploads_by_role
+        ]
+        references.sort(key=lambda item: int(item["slot"]))
+        background = uploads_by_role.get("anchor") or uploads_by_role.get("background")
+        if not background:
+            raise ValueError("MSR V2 통합 앵커 이미지 업로드 결과가 없습니다.")
+        workflow, summary = build_msr_v2_workflow(
+            template=template,
+            references=references,
+            background=background,
+            relay_segments=list(request.get("relay_segments") or []),
+            global_prompt=str(request["global_prompt"]),
+            seed=int(request["seed"]),
+            filename_prefix=str(request["filename_prefix"]),
+            width=width,
+            height=height,
+            epsilon=float(request.get("relay_epsilon") or 0.0011),
+            reference_frame_count=int(request.get("msr_reference_frame_count") or 65),
+            maximum_duration_seconds=request.get("maximum_duration_seconds"),
+            prompt_strategy=str(request.get("prompt_strategy") or "legacy_msr_v2"),
         )
     else:
-        workflow, summary = build_workflow(**common_build_args)
+        common_build_args = {
+            "template": template,
+            "segments": segment_specs,
+            "global_prompt": str(request["global_prompt"]),
+            "fps": int(request["fps"]),
+            "seed": int(request["seed"]),
+            "filename_prefix": str(request["filename_prefix"]),
+            "target_total_seconds": request.get("target_total_seconds"),
+            "width": width,
+            "height": height,
+        }
+        if retake_video_upload is not None:
+            workflow, summary = build_retake_workflow(
+                **common_build_args,
+                retake_video_name=str(retake_video_upload["name"]),
+                retake_video_subfolder=str(retake_video_upload["subfolder"]),
+                retake_video_size_bytes=retake_video_size,
+                retake_video_duration_seconds=float(
+                    request.get("retake_source_duration_seconds") or 0.0
+                ),
+                retake_start_seconds=float(request["retake_start_seconds"]),
+                retake_end_seconds=float(request["retake_end_seconds"]),
+                retake_prompt=str(request["retake_corrections"]),
+                retake_strength=float(request.get("retake_strength", 1.0)),
+            )
+        else:
+            workflow, summary = build_workflow(**common_build_args)
     atomic_write_json(job_dir / "workflow_api_runtime.json", workflow)
 
     manifest = read_json(job_dir / "manifest.json", {}) or {}
@@ -2235,6 +2271,25 @@ def maybe_finalize_open_batch() -> dict[str, Any] | None:
         )
 
     batch = mark_batch_generation_complete(ENGINE_ROOT, batch)
+    try:
+        synced = candidate_set_status.reconcile_candidate_sets(
+            ENGINE_ROOT,
+            batch.get("candidate_set_ids") or [],
+        )
+        if synced:
+            log_event(
+                "candidate_sets_generation_status_synced",
+                batch_id=batch_id,
+                candidate_sets={
+                    item["candidate_set_id"]:item["status"] for item in synced
+                },
+            )
+    except Exception as exc:
+        log_event(
+            "candidate_sets_generation_status_sync_failed",
+            batch_id=batch_id,
+            error=str(exc),
+        )
     log_batch_state(batch)
     log_event(
         "batch_generation_complete",

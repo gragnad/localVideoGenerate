@@ -18,6 +18,9 @@ KOREAN_SPEECH_POLICY = (
     "Do not use English or any other language for speech. Non-verbal ambience and "
     "sound effects may remain language-neutral."
 )
+DIRECTOR_PROMPT_RELAY_EPSILON = 0.5
+DIRECTOR_AUDIO_PROMPT_RELAY_EPSILON = 0.01
+DIRECTOR_IMAGE_GUIDE_STRENGTH = 0.75
 KOREAN_SPEECH_POLICY_MARKER = "LANGUAGE REQUIREMENT: All spoken dialogue"
 
 
@@ -334,6 +337,8 @@ def build_workflow(
     timeline["segments"] = timeline_segments
     timeline["motionSegments"] = []
     timeline["audioSegments"] = []
+    relay_options = timeline.setdefault("relayOptions", {})
+    relay_options["audioEpsilon"] = DIRECTOR_AUDIO_PROMPT_RELAY_EPSILON
 
     inputs = director["inputs"]
     inputs["start_second"] = 0
@@ -347,7 +352,8 @@ def build_workflow(
         apply_korean_speech_policy(item.prompt) for item in runtime
     )
     inputs["segment_lengths"] = ",".join(str(item.frame_count) for item in runtime)
-    inputs["guide_strength"] = ",".join("1.00" for _ in runtime)
+    inputs["guide_strength"] = ",".join(f"{DIRECTOR_IMAGE_GUIDE_STRENGTH:.2f}" for _ in runtime)
+    inputs["epsilon"] = DIRECTOR_PROMPT_RELAY_EPSILON
     inputs["frame_rate"] = fps
     inputs["custom_width"] = int(width)
     inputs["custom_height"] = int(height)
@@ -367,6 +373,9 @@ def build_workflow(
         "width": int(width),
         "height": int(height),
         "resolution": f"{width}x{height}",
+        "prompt_relay_epsilon": DIRECTOR_PROMPT_RELAY_EPSILON,
+        "audio_prompt_relay_epsilon": DIRECTOR_AUDIO_PROMPT_RELAY_EPSILON,
+        "image_guide_strength": DIRECTOR_IMAGE_GUIDE_STRENGTH,
         "segments": [
             {
                 **asdict(item),
@@ -376,6 +385,147 @@ def build_workflow(
         ],
     }
     return workflow, summary
+
+
+MSR_V2_LORA = "LTX-2.3-Licon-MSR-V2.safetensors"
+
+
+def _msr_node(workflow: dict[str, Any], node_id: str, class_type: str) -> dict[str, Any]:
+    node = workflow.get(node_id)
+    if not isinstance(node, dict) or node.get("class_type") != class_type:
+        raise ValueError(f"MSR V2 워크플로 노드 {node_id} ({class_type})를 찾을 수 없습니다.")
+    return node
+
+
+def build_msr_v2_workflow(
+    *,
+    template: dict[str, Any],
+    references: list[dict[str, str]],
+    background: dict[str, str],
+    relay_segments: list[dict[str, Any]],
+    global_prompt: str,
+    seed: int,
+    filename_prefix: str,
+    width: int,
+    height: int,
+    epsilon: float = 0.0011,
+    reference_frame_count: int = 65,
+    maximum_duration_seconds: float | None = None,
+    prompt_strategy: str = "legacy_msr_v2",
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build MSR V2 while preserving the semantic meaning of reference slots 1-4."""
+    if not 1 <= len(references) <= 4:
+        raise ValueError("MSR V2 참조 이미지는 1~4장이어야 합니다.")
+    slotted: dict[int, dict[str, str]] = {}
+    for index, reference in enumerate(references, 1):
+        slot = int(reference.get("slot") or index)
+        if slot < 1 or slot > 4:
+            raise ValueError(f"MSR V2 참조 슬롯은 1~4만 가능합니다: {slot}")
+        if slot in slotted:
+            raise ValueError(f"MSR V2 참조 슬롯이 중복되었습니다: {slot}")
+        slotted[slot] = reference
+    if 1 not in slotted:
+        raise ValueError("MSR V2 캐릭터 참조 슬롯 1은 필수입니다.")
+    if width <= 0 or height <= 0 or width % 32 or height % 32:
+        raise ValueError("MSR V2 해상도는 가로·세로 모두 32의 배수여야 합니다.")
+    if not relay_segments:
+        raise ValueError("프롬프트 릴레이 구간을 한 개 이상 입력하세요.")
+    durations = [float(item.get("seconds") or 0) for item in relay_segments]
+    if any(value <= 0 for value in durations):
+        raise ValueError("각 프롬프트 릴레이 시간은 0초보다 커야 합니다.")
+    requested_seconds = sum(durations)
+    if maximum_duration_seconds is not None and requested_seconds > float(maximum_duration_seconds) + 1e-6:
+        raise ValueError(
+            f"MSR 연속 생성은 최대 {float(maximum_duration_seconds):g}초입니다. "
+            f"현재 합계: {requested_seconds:g}초"
+        )
+    prompts = [str(item.get("prompt") or "").strip() for item in relay_segments]
+    if any(not prompt for prompt in prompts):
+        raise ValueError("모든 프롬프트 릴레이 구간에 프롬프트가 필요합니다.")
+
+    fps = 24
+    segment_frames = allocate_frames(durations, fps)
+    raw_total = sum(segment_frames)
+    total_frames = ((max(1, raw_total) - 1 + 7) // 8) * 8 + 1
+    if maximum_duration_seconds is not None and total_frames / fps > float(maximum_duration_seconds):
+        frame_cap = max(1, int(math.floor(float(maximum_duration_seconds) * fps)))
+        total_frames = ((frame_cap - 1) // 8) * 8 + 1
+    adjustment = total_frames - raw_total
+    if adjustment >= 0:
+        segment_frames[-1] += adjustment
+    else:
+        remaining = -adjustment
+        for index in range(len(segment_frames) - 1, -1, -1):
+            removable = max(0, segment_frames[index] - 1)
+            take = min(removable, remaining)
+            segment_frames[index] -= take
+            remaining -= take
+            if remaining == 0:
+                break
+        if remaining:
+            raise ValueError("MSR 프레임 길이를 유효한 범위로 조정할 수 없습니다.")
+
+    workflow = copy.deepcopy(template)
+    load_ids = {1: "29", 2: "33", 3: "196", 4: "201"}
+    msr = _msr_node(workflow, "190", "LiconMSR")
+    for slot, node_id in load_ids.items():
+        reference = slotted.get(slot)
+        if reference is None:
+            workflow.pop(node_id, None)
+            msr["inputs"].pop(str(slot), None)
+            continue
+        node = _msr_node(workflow, node_id, "LoadImage")
+        node["inputs"]["image"] = str(
+            PurePosixPath(reference.get("subfolder", "")) / reference["name"]
+        )
+    _msr_node(workflow, "194", "LoadImage")["inputs"]["image"] = str(
+        PurePosixPath(background.get("subfolder", "")) / background["name"]
+    )
+
+    _msr_node(workflow, "43", "INTConstant")["inputs"]["value"] = int(width)
+    _msr_node(workflow, "44", "INTConstant")["inputs"]["value"] = int(height)
+    _msr_node(workflow, "50", "INTConstant")["inputs"]["value"] = total_frames
+    _msr_node(workflow, "129", "FloatConstant")["inputs"]["value"] = fps
+    _msr_node(workflow, "15", "RandomNoise")["inputs"]["noise_seed"] = int(seed)
+    _msr_node(workflow, "172", "CreateVideo")["inputs"]["fps"] = fps
+    _msr_node(workflow, "7", "LTXVConditioning")["inputs"]["frame_rate"] = fps
+    audio = _msr_node(workflow, "22", "LTXVEmptyLatentAudio")["inputs"]
+    audio.update(frames_number=total_frames, frame_rate=fps)
+    msr["inputs"].update(width=int(width), height=int(height), frame_count=str(reference_frame_count))
+    lora = _msr_node(workflow, "10", "LTXICLoRALoaderModelOnly")["inputs"]
+    lora.update(lora_name=MSR_V2_LORA)
+    relay = _msr_node(workflow, "180", "PromptRelayEncode")["inputs"]
+    effective_global = str(global_prompt or "").strip()
+    if prompt_strategy != "msr_continuity_v1":
+        effective_global = apply_korean_speech_policy(effective_global)
+    elif not effective_global:
+        raise ValueError("MSR 연속 생성 글로벌 프롬프트가 비어 있습니다.")
+    effective_prompts = [apply_korean_speech_policy(prompt) for prompt in prompts]
+    relay.update(
+        global_prompt=effective_global,
+        local_prompts=" | ".join(effective_prompts),
+        segment_lengths=",".join(str(value) for value in segment_frames),
+        epsilon=float(epsilon),
+    )
+    _msr_node(workflow, "173", "SaveVideo")["inputs"]["filename_prefix"] = filename_prefix
+    return workflow, {
+        "mode": "msr_sequence_v2" if prompt_strategy == "msr_continuity_v1" else "msr_v2",
+        "prompt_strategy": prompt_strategy,
+        "fps": fps,
+        "seed": int(seed),
+        "width": int(width),
+        "height": int(height),
+        "total_frames": total_frames,
+        "total_seconds": total_frames / fps,
+        "requested_seconds": requested_seconds,
+        "segment_frames": segment_frames,
+        "reference_count": len(slotted),
+        "reference_slots": sorted(slotted),
+        "reference_frame_count": int(reference_frame_count),
+        "filename_prefix": filename_prefix,
+        "global_prompt": effective_global,
+        "language_policy": "spoken_korean_required",
+    }
 
 
 def build_retake_workflow(

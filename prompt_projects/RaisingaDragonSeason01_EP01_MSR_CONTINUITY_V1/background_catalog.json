@@ -1,0 +1,443 @@
+{
+  "schema_version": 2,
+  "project_id": "RaisingaDragonSeason01_EP01_MSR_CONTINUITY_V1",
+  "backgrounds": {
+    "ANC_SC01-001_M01": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-001_M01.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. A storm-lashed night ocean seen in one immense coherent wide composition, giant black waves, forked lightning, diagonal rain, and a tiny blue glow barely visible beneath a distant wave trough. Young Mir is not yet clearly visible. Leave depth and open water for the glow to travel toward the coast. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-001_M01",
+      "description": "A storm-lashed night ocean seen in one immense coherent wide composition, giant black waves, forked lightning, diagonal rain, and a tiny blue glow barely visible beneath a distant wave trough. Young Mir is not yet clearly visible. Leave depth and open water for the glow to travel toward the coast.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-001_M02": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-001_M02.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. A ruined deep-sea palace corridor with a cracked ancient coral pillar, drifting marine dust and cold blue darkness. Young Mir is small within the immense ruins, wounded and nearly unconscious inside a weak blue glow. One coherent underwater moment with clear scale and no other creature. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-001_M02",
+      "description": "A ruined deep-sea palace corridor with a cracked ancient coral pillar, drifting marine dust and cold blue darkness. Young Mir is small within the immense ruins, wounded and nearly unconscious inside a weak blue glow. One coherent underwater moment with clear scale and no other creature.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-001_M03": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-001_M03.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. A vertical deep-sea pursuit corridor above the ruined palace. Young Mir struggles upward along a diagonal blue shaft of light while the Black Tide rises below as living black water and unstable shadow shapes. Keep both entities clearly separated in depth and preserve an open ascent path. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Use a selected stable end frame from the previous clip when continuity_mode is continuity_frame.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-001_M03",
+      "description": "A vertical deep-sea pursuit corridor above the ruined palace. Young Mir struggles upward along a diagonal blue shaft of light while the Black Tide rises below as living black water and unstable shadow shapes. Keep both entities clearly separated in depth and preserve an open ascent path.",
+      "continuity_mode": "continuity_frame",
+      "continuity_from_clip": "SC01-001_M02"
+    },
+    "ANC_SC01-001_M04": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-001_M04.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. A submerged memory-space made from fragments of a broken dragon palace gate, sleeping colossal dragon silhouettes and black root-like darkness. Young Mir floats small and frightened at the center while the Black Tide remains an abstract pressure around the edges, not a humanoid figure. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-001_M04",
+      "description": "A submerged memory-space made from fragments of a broken dragon palace gate, sleeping colossal dragon silhouettes and black root-like darkness. Young Mir floats small and frightened at the center while the Black Tide remains an abstract pressure around the edges, not a humanoid figure.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-001_M05": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-001_M05.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. A distant storm coast at night with violent surf, wet black rocks and a small blue glow carried inside a wave toward shore. Young Mir is mostly obscured by water but his blue-silver silhouette can be faintly recognized. One coherent coastal wide image. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-001_M05",
+      "description": "A distant storm coast at night with violent surf, wet black rocks and a small blue glow carried inside a wave toward shore. Young Mir is mostly obscured by water but his blue-silver silhouette can be faintly recognized. One coherent coastal wide image.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-002_M01": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-002_M01.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. A post-storm coastal village morning on a wet stone breakwater. Lua has room to enter, stalk a small fish shadow below the edge, thrust her fishing spear, fall into shallow water and stand again. Damaged nets, broken wood and small boats establish the storm aftermath. No village children or adults are visible. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-002_M01",
+      "description": "A post-storm coastal village morning on a wet stone breakwater. Lua has room to enter, stalk a small fish shadow below the edge, thrust her fishing spear, fall into shallow water and stand again. Damaged nets, broken wood and small boats establish the storm aftermath. No village children or adults are visible.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-002_M02": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-002_M02.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. The same wet breakwater after Lua has climbed from the shallows. Lua stands wet with her spear while Village Child 1 has newly entered at a separate distance behind her. Their silhouettes and identities are clearly separated; no second village child is present. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-002_M02",
+      "description": "The same wet breakwater after Lua has climbed from the shallows. Lua stands wet with her spear while Village Child 1 has newly entered at a separate distance behind her. Their silhouettes and identities are clearly separated; no second village child is present.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-002_M03": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-002_M03.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. A fresh conversational angle on the wet breakwater. Lua stands damp and defensive with her fishing spear; Village Child 2 faces her with a woven shoulder basket at her own hip. Keep both girls visually distinct and exclude Village Child 1 from the frame. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-002_M03",
+      "description": "A fresh conversational angle on the wet breakwater. Lua stands damp and defensive with her fishing spear; Village Child 2 faces her with a woven shoulder basket at her own hip. Keep both girls visually distinct and exclude Village Child 1 from the frame.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-002_M04": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-002_M04.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. A grounded two-person composition on the wet coastal breakwater. Lua stands with her fishing spear while the Old Fisherman has approached and calmly faces her. The cliff cave is visible far along their shared sightline. No village children are visible. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-002_M04",
+      "description": "A grounded two-person composition on the wet coastal breakwater. Lua stands with her fishing spear while the Old Fisherman has approached and calmly faces her. The cliff cave is visible far along their shared sightline. No village children are visible.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-002_M05": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-002_M05.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. Lua alone at the edge of the coastal village with the distant cliff cave visible beyond wet rocks. A faint blue pulse comes from the cave mouth. Lua holds her fishing spear and has a clear hidden route away from the adults. No fisherman or children are visible. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-002_M05",
+      "description": "Lua alone at the edge of the coastal village with the distant cliff cave visible beyond wet rocks. A faint blue pulse comes from the cave mouth. Lua holds her fishing spear and has a clear hidden route away from the adults. No fisherman or children are visible.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-003_M01": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-003_M01.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. A dark wet coastal cave with shallow seawater, dripping rock, a narrow entrance behind Lua and a faint blue glow deeper inside. Lua enters alone with her fishing spear held forward. Preserve an unobstructed path from the entrance toward the glow; no dragon is visible yet. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-003_M01",
+      "description": "A dark wet coastal cave with shallow seawater, dripping rock, a narrow entrance behind Lua and a faint blue glow deeper inside. Lua enters alone with her fishing spear held forward. Preserve an unobstructed path from the entrance toward the glow; no dragon is visible yet.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-003_M02": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-003_M02.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. Inside the same wet cave, Lua kneels at a respectful distance from a rock crevice while wounded Young Mir is partly visible in weak blue light. Lua's spear is lowered away from Mir. Keep Lua fully human and Mir fully dragon, with clear physical separation and an open approach path. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-003_M02",
+      "description": "Inside the same wet cave, Lua kneels at a respectful distance from a rock crevice while wounded Young Mir is partly visible in weak blue light. Lua's spear is lowered away from Mir. Keep Lua fully human and Mir fully dragon, with clear physical separation and an open approach path.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-003_M03": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-003_M03.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. Use a stable continuation frame from the first meeting: Lua crouched low with an open hand offered near the ground, Young Mir weak and unable to retreat on wet stone. Maintain the same cave axis, distance, anatomy separation and blue lighting. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Use a selected stable end frame from the previous clip when continuity_mode is continuity_frame.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-003_M03",
+      "description": "Use a stable continuation frame from the first meeting: Lua crouched low with an open hand offered near the ground, Young Mir weak and unable to retreat on wet stone. Maintain the same cave axis, distance, anatomy separation and blue lighting.",
+      "continuity_mode": "continuity_frame",
+      "continuity_from_clip": "SC01-003_M02"
+    },
+    "ANC_SC01-003_M04": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-003_M04.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. A single submerged vision of a ruined dragon palace, a broken ceremonial gate, sleeping colossal dragon silhouettes, black root-like corruption and a fading blue heart deep below. Young Mir's blue crown-wave mark is the visual key connecting these fragments. No human figure is visible. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-003_M04",
+      "description": "A single submerged vision of a ruined dragon palace, a broken ceremonial gate, sleeping colossal dragon silhouettes, black root-like corruption and a fading blue heart deep below. Young Mir's blue crown-wave mark is the visual key connecting these fragments. No human figure is visible.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-003_M05": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-003_M05.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. Back in the wet cave, Lua kneels beside weak Young Mir after the blue flash. A fresh blue mark glows on Lua's wrist and Mir's chest mark answers faintly. Keep their bodies separate, their eye contact readable and the cave lighting stable. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-003_M05",
+      "description": "Back in the wet cave, Lua kneels beside weak Young Mir after the blue flash. A fresh blue mark glows on Lua's wrist and Mir's chest mark answers faintly. Keep their bodies separate, their eye contact readable and the cave lighting stable.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-003_M06": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-003_M06.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. Use a stable continuation frame in the cave: Lua close to Young Mir with enough cloth available to wrap him, the cave entrance visible behind her. Maintain the same lighting and anatomy separation; the off-screen villager is never shown. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Use a selected stable end frame from the previous clip when continuity_mode is continuity_frame.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-003_M06",
+      "description": "Use a stable continuation frame in the cave: Lua close to Young Mir with enough cloth available to wrap him, the cave entrance visible behind her. Maintain the same lighting and anatomy separation; the off-screen villager is never shown.",
+      "continuity_mode": "continuity_frame",
+      "continuity_from_clip": "SC01-003_M05"
+    },
+    "ANC_SC01-004_M01": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-004_M01.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. Lua's small worn coastal house in daylight: wooden bed, small table, shallow water bowl, shells, dry fish, nets, water container and a cloth-covered window. Lua has just placed Young Mir near the bowl after secretly bringing him inside. The room has clear reachable paths between bowl, table and bed. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-004_M01",
+      "description": "Lua's small worn coastal house in daylight: wooden bed, small table, shallow water bowl, shells, dry fish, nets, water container and a cloth-covered window. Lua has just placed Young Mir near the bowl after secretly bringing him inside. The room has clear reachable paths between bowl, table and bed.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-004_M02": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-004_M02.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. Use a stable continuation frame inside Lua's house: Lua sits protectively between Young Mir and the closed door, her glowing wrist mark partly hidden, while Mir remains near the shallow bowl and shell. Keep the imagined adults off-screen as voices only. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Use a selected stable end frame from the previous clip when continuity_mode is continuity_frame.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-004_M02",
+      "description": "Use a stable continuation frame inside Lua's house: Lua sits protectively between Young Mir and the closed door, her glowing wrist mark partly hidden, while Mir remains near the shallow bowl and shell. Keep the imagined adults off-screen as voices only.",
+      "continuity_mode": "continuity_frame",
+      "continuity_from_clip": "SC01-004_M01"
+    },
+    "ANC_SC01-004_M03": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-004_M03.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. Use the same house continuity: Lua waits beside the water bowl while Young Mir faces her and prepares to try a tiny water ability. Keep the shell near Mir and preserve the room layout, lighting and character scale. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Use a selected stable end frame from the previous clip when continuity_mode is continuity_frame.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-004_M03",
+      "description": "Use the same house continuity: Lua waits beside the water bowl while Young Mir faces her and prepares to try a tiny water ability. Keep the shell near Mir and preserve the room layout, lighting and character scale.",
+      "continuity_mode": "continuity_frame",
+      "continuity_from_clip": "SC01-004_M02"
+    },
+    "ANC_SC01-005_M01": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-005_M01.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. Lua's house at night in one quiet coherent composition. Lua sleeps on the wooden bed while Young Mir sleeps curled in the shallow water bowl nearby. Their wrist and chest marks can faintly answer each other across the dark room. The window remains covered. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-005_M01",
+      "description": "Lua's house at night in one quiet coherent composition. Lua sleeps on the wooden bed while Young Mir sleeps curled in the shallow water bowl nearby. Their wrist and chest marks can faintly answer each other across the dark room. The window remains covered.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-005_M02": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-005_M02.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. A ruined dragon palace dream with black roots around a blue heart stone. Young Mir stands small in the foreground while one enormous future prince-dragon shadow with crown-like horns stretches behind him as a symbolic silhouette of the same identity, not a second creature. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-005_M02",
+      "description": "A ruined dragon palace dream with black roots around a blue heart stone. Young Mir stands small in the foreground while one enormous future prince-dragon shadow with crown-like horns stretches behind him as a symbolic silhouette of the same identity, not a second creature.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-005_M03": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-005_M03.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. Back in the dark house, Lua has awakened and holds trembling Young Mir securely against her chest beside the water bowl. Their blue marks glow softly. Preserve the night room layout and keep Lua human, Mir dragon and both identities clearly separate. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-005_M03",
+      "description": "Back in the dark house, Lua has awakened and holds trembling Young Mir securely against her chest beside the water bowl. Their blue marks glow softly. Preserve the night room layout and keep Lua human, Mir dragon and both identities clearly separate.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    },
+    "ANC_SC01-005_M04": {
+      "required": true,
+      "suggested_filename": "ANC_SC01-005_M04.png",
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {
+        "width": 1280,
+        "height": 704
+      },
+      "prompt": "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. A night view from inside Lua's house toward the window and silent sea. Lua stands at the window in the foreground while the Black Jellyfish floats above the distant water outside, translucent black body filled with ink-like smoke and long tentacles below. Young Mir is off-screen and heard only. One coherent moment, not a storyboard or collage.",
+      "negative_prompt": "split screen, comic panels, collage, duplicated character, merged identities, extra limbs, swapped clothing, floating prop, text, subtitle, watermark, flat poster pose",
+      "continuity_notes": [
+        "Generate or supply a fresh integrated anchor because cast or environment changes here.",
+        "The anchor conditions identity and spatial layout; it is not an exact timed frame guarantee."
+      ],
+      "background_id": "ANC_SC01-005_M04",
+      "description": "A night view from inside Lua's house toward the window and silent sea. Lua stands at the window in the foreground while the Black Jellyfish floats above the distant water outside, translucent black body filled with ink-like smoke and long tentacles below. Young Mir is off-screen and heard only.",
+      "continuity_mode": "new_anchor",
+      "continuity_from_clip": null
+    }
+  }
+}

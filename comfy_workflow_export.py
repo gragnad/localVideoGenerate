@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """Static ComfyUI workflow (graph) to API prompt conversion helpers.
 
-This module intentionally does not import or start ComfyUI.  The widget schema is
-limited to the nodes used by the bundled LTX 2.3 Pixel Spatial Upscaler workflow.
+This module intentionally does not import or start ComfyUI.  The widget schema covers
+the bundled LTX 2.3 upscaler and MSR V2 workflows.
 """
 
 import copy
@@ -17,7 +17,7 @@ WIDGET_SCHEMAS: dict[str, tuple[str, ...]] = {
     "CheckpointLoaderSimple": ("ckpt_name",),
     "CLIPTextEncode": ("text",),
     "ComfyMathExpression": ("expression",),
-    "CreateVideo": ("fps",),
+    "CreateVideo": ("fps", "bit_depth"),
     "KSamplerSelect": ("sampler_name",),
     "LoraLoaderModelOnly": ("lora_name", "strength_model"),
     "LTXAVTextEncoderLoader": ("text_encoder", "ckpt_name", "device"),
@@ -35,7 +35,24 @@ WIDGET_SCHEMAS: dict[str, tuple[str, ...]] = {
     "LoadVideo": ("file",),
     "ManualSigmas": ("sigmas",),
     "RandomNoise": ("noise_seed",),
+    "SaveImage": ("filename_prefix",),
     "SaveVideo": ("filename_prefix", "format", "codec"),
+    "LoadImage": ("image",),
+    "GetFrameByIndex": ("index",),
+    "PromptRelayEncode": ("global_prompt", "local_prompts", "segment_lengths", "epsilon"),
+    "LiconMSR": ("width", "height", "frame_count"),
+    "INTConstant": ("value",),
+    "FloatConstant": ("value",),
+    "SimpleMath+": ("expression",),
+    "LTXVEmptyLatentAudio": ("frames_number", "frame_rate", "batch_size"),
+    "EmptyLTXVLatentVideo": ("width", "height", "length", "batch_size"),
+    "LowVRAMCheckpointLoader": ("ckpt_name",),
+    "LTX2_NAG": ("nag_scale", "nag_alpha", "nag_tau", "inplace"),
+    "LTXVAddGuideMulti": (
+        "num_guides",
+        "num_guides.frame_idx_1",
+        "num_guides.strength_1",
+    ),
 }
 
 
@@ -69,16 +86,55 @@ def _resize_widgets(values: list[Any]) -> dict[str, Any]:
 
 
 def graph_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
-    """Convert the installed official LTX upscaler graph without running ComfyUI."""
+    """Convert an installed supported LTX graph without running ComfyUI."""
     nodes = workflow.get("nodes")
     links = workflow.get("links")
     if not isinstance(nodes, list) or not isinstance(links, list):
         raise ValueError("ComfyUI graph 형식(nodes/links)이 아닙니다.")
 
-    link_sources = {int(link[0]): [str(link[1]), int(link[2])] for link in links}
+    active_nodes = {
+        int(node["id"]): node
+        for node in nodes
+        if int(node.get("mode", 0)) == 0 and node.get("type") != "Note"
+    }
+    api_ids = {
+        node_id
+        for node_id, node in active_nodes.items()
+        if node.get("type") != "Reroute"
+    }
+    raw_links = {int(link[0]): link for link in links}
+
+    def resolve_source(node_id: int, output_slot: int, seen: set[int] | None = None) -> list[Any]:
+        node = active_nodes.get(node_id)
+        if node is None:
+            raise ValueError(f"비활성 또는 누락된 연결 소스 노드입니다: {node_id}")
+        if node.get("type") != "Reroute":
+            return [str(node_id), int(output_slot)]
+        visited = set(seen or ())
+        if node_id in visited:
+            raise ValueError(f"Reroute 순환 연결을 발견했습니다: {node_id}")
+        visited.add(node_id)
+        input_link = next(
+            (item.get("link") for item in node.get("inputs") or [] if item.get("link") is not None),
+            None,
+        )
+        if input_link is None or int(input_link) not in raw_links:
+            raise ValueError(f"입력 연결이 없는 Reroute 노드입니다: {node_id}")
+        link = raw_links[int(input_link)]
+        return resolve_source(int(link[1]), int(link[2]), visited)
+
+    link_sources: dict[int, list[Any]] = {}
+    for link in links:
+        source_id, target_id = int(link[1]), int(link[3])
+        if source_id in active_nodes and target_id in api_ids:
+            link_sources[int(link[0])] = resolve_source(source_id, int(link[2]))
+
     output: dict[str, Any] = {}
     for source in nodes:
-        if int(source.get("mode", 0)) != 0 or source.get("type") == "Note":
+        if (
+            int(source.get("mode", 0)) != 0
+            or source.get("type") in {"Note", "Reroute"}
+        ):
             continue
         node_id = str(source["id"])
         class_type = str(source["type"])
@@ -93,7 +149,7 @@ def graph_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
 
         for input_spec in source.get("inputs") or []:
             link_id = input_spec.get("link")
-            if link_id is not None:
+            if link_id is not None and int(link_id) in link_sources:
                 inputs[str(input_spec["name"])] = link_sources[int(link_id)]
 
         title = source.get("title") or class_type

@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "project_id": "RaisingaDragonSeason01",
+  "backgrounds": {
+    "BG_EP01_STORM_DEEP_SEA_NIGHT": {
+      "background_id": "BG_EP01_STORM_DEEP_SEA_NIGHT",
+      "suggested_filename": "BG_EP01_STORM_DEEP_SEA_NIGHT.png",
+      "description": "폭풍 밤바다와 심해. 거대한 파도, 번개, 비바람. 깊은 바다 아래 무너진 용궁 산호 기둥.",
+      "scenes": ["SC01-001"],
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {"width": 1536, "height": 864},
+      "prompt": "High-quality feature-film animation background plate matching the exact visual style, line quality, color palette and rendering finish of the supplied character references. Ocean fantasy animated film aesthetic.\n\nA vast storm-tossed night ocean transitioning into deep underwater ruins. Foreground: churning dark waves with white foam crests and rain streaks, open central water space for a distant blue glow. Middle distance: lightning-lit wave walls and turbulent sea surface. Background: deep teal abyss with faint silhouettes of collapsed ancient coral palace pillars, bioluminescent blue accents on cracked coral columns, drifting marine snow particles.\n\nEye-level to slight high-angle wide composition, 16:9 cinematic framing. Camera faces open sea with gradual downward perspective toward deep water. Cold moonless storm lighting with intermittent cool-white lightning flashes from upper left, deep cyan ambient underwater fill, blue bioluminescent accents on coral.\n\nSoft atmospheric haze, hand-painted animated background rendering, strong depth separation between storm surface and deep sea layers.\n\nClean empty background plate. No characters, people, animals, dragons, crowds, silhouettes, faces, readable signs, text, logos or watermarks.",
+      "negative_prompt": "characters, people, animals, dragons, crowd, silhouettes, faces, readable text, logo, watermark, sign, live-action, photorealistic, 3D render, blurry, low quality",
+      "continuity_notes": [
+        "Storm night palette: dark blue-black sea, cool lightning, teal deep water",
+        "Bioluminescent blue accent on coral ruins",
+        "Open central performance space in water for character placement",
+        "Lightning direction from upper left frame"
+      ]
+    },
+    "BG_EP01_COASTAL_VILLAGE_MORNING": {
+      "background_id": "BG_EP01_COASTAL_VILLAGE_MORNING",
+      "suggested_filename": "BG_EP01_COASTAL_VILLAGE_MORNING.png",
+      "description": "폭풍 직후 아침의 작은 바닷가 마을. 젖은 방파제, 어수선한 해변, 마을 작업 공간.",
+      "scenes": ["SC01-002"],
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {"width": 1536, "height": 864},
+      "prompt": "High-quality feature-film animation background plate matching the exact visual style, line quality, color palette and rendering finish of the supplied character references. Ocean fantasy animated film aesthetic.\n\nA small coastal fishing village work shore on the morning after a storm. Foreground: wet stone breakwater surface with clear open standing area for a young girl character, scattered wet rope coils and a wooden bucket at the edges without blocking center. Middle distance: overturned small boats, tangled fishing nets, broken wooden debris on damp sand, low village houses with weathered walls. Background: calm post-storm sky with soft grey-white clouds, gentle sea horizon, distant cliff with cave entrance hint.\n\nEye-level medium-wide composition facing the sea from the breakwater, 16:9 cinematic framing. Soft diffused morning sunlight from frame right after storm, cool blue ambient bounce from wet surfaces, warm sandy highlights.\n\nDetailed hand-painted animated village background, cinematic depth, fresh post-rain atmosphere.\n\nClean empty background plate. No characters, people, animals, crowds, silhouettes, faces, readable signs, text, logos or watermarks.",
+      "negative_prompt": "characters, people, animals, crowd, silhouettes, faces, readable text, logo, watermark, sign, live-action, photorealistic, 3D render, blurry, low quality",
+      "continuity_notes": [
+        "Post-storm morning: wet surfaces, soft overcast light",
+        "Breakwater center clear for Lua standing with spear",
+        "Cave cliff visible in far background right",
+        "Warm-cool balance: grey sky, blue sea, brown wood"
+      ]
+    },
+    "BG_EP01_COASTAL_CAVE_INTERIOR": {
+      "background_id": "BG_EP01_COASTAL_CAVE_INTERIOR",
+      "suggested_filename": "BG_EP01_COASTAL_CAVE_INTERIOR.png",
+      "description": "해안 절벽 아래 좁고 젖은 동굴 내부. 얕은 바닷물, 바위, 안쪽 깊은 푸른빛.",
+      "scenes": ["SC01-003"],
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {"width": 1536, "height": 864},
+      "prompt": "High-quality feature-film animation background plate matching the exact visual style, line quality, color palette and rendering finish of the supplied character references. Ocean fantasy animated film aesthetic.\n\nA narrow wet coastal cave interior beneath sea cliffs. Foreground: shallow seawater covering uneven rock floor with reflective ripples, clear central approach path for two characters. Middle distance: dark damp stone walls with water droplets, rocky crevices along sides, faint blue glow emanating from deeper cave interior. Background: cave tunnel receding into shadow with soft mystical blue light source, no visible exit sky.\n\nEye-level medium composition looking into cave depth, 16:9 cinematic framing. Cool ambient blue-teal light from cave interior back-left, dim natural daylight hint at cave mouth behind camera, wet surface specular highlights.\n\nHand-painted animated cave environment, moist atmosphere, cinematic depth.\n\nClean empty background plate. No characters, people, animals, dragons, crowds, silhouettes, faces, readable signs, text, logos or watermarks.",
+      "negative_prompt": "characters, people, animals, dragons, crowd, silhouettes, faces, readable text, logo, watermark, sign, live-action, photorealistic, 3D render, blurry, low quality",
+      "continuity_notes": [
+        "Wet cave palette: dark grey stone, teal water, blue inner glow",
+        "Central floor space for Lua and Young Mir interaction",
+        "Blue glow stronger toward cave depth",
+        "Consistent damp reflective water surface"
+      ]
+    },
+    "BG_EP01_LUA_HOUSE_INTERIOR_DAY": {
+      "background_id": "BG_EP01_LUA_HOUSE_INTERIOR_DAY",
+      "suggested_filename": "BG_EP01_LUA_HOUSE_INTERIOR_DAY.png",
+      "description": "루아의 작고 낡은 집 낮 interior. 나무 침대, 탁자, 물그릇, 조개껍데기, 그물.",
+      "scenes": ["SC01-004"],
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {"width": 1536, "height": 864},
+      "prompt": "High-quality feature-film animation background plate matching the exact visual style, line quality, color palette and rendering finish of the supplied character references. Ocean fantasy animated film aesthetic.\n\nA small worn coastal house interior during daytime. Foreground: wooden floor with clear open area near center for characters, shallow water basin and scattered shell fragments at sides. Middle distance: simple wooden bed, small table with dried fish and water jug, fishing net rolled against wall, clay water container, cloth hanging by window. Background: small window with daylight streaming in, modest wooden walls with sea-worn texture.\n\nEye-level medium-wide interior composition, 16:9 cinematic framing. Warm daylight from window frame left, soft ambient fill, cozy humble coastal home atmosphere.\n\nDetailed hand-painted animated interior background, lived-in props, cinematic depth.\n\nClean empty background plate. No characters, people, animals, dragons, crowds, silhouettes, faces, readable signs, text, logos or watermarks.",
+      "negative_prompt": "characters, people, animals, dragons, crowd, silhouettes, faces, readable text, logo, watermark, sign, live-action, photorealistic, 3D render, blurry, low quality",
+      "continuity_notes": [
+        "Humble wooden interior, warm daylight",
+        "Water basin prop placement consistent for Mir resting",
+        "Table with shells and dried fish at side",
+        "Open center floor for character blocking"
+      ]
+    },
+    "BG_EP01_LUA_HOUSE_INTERIOR_NIGHT": {
+      "background_id": "BG_EP01_LUA_HOUSE_INTERIOR_NIGHT",
+      "suggested_filename": "BG_EP01_LUA_HOUSE_INTERIOR_NIGHT.png",
+      "description": "밤의 루아 집 내부. 어둡고 조용한 방, 창문으로 밤바다, 침대와 물그릇.",
+      "scenes": ["SC01-005"],
+      "aspect_ratio": "16:9",
+      "recommended_resolution": {"width": 1536, "height": 864},
+      "prompt": "High-quality feature-film animation background plate matching the exact visual style, line quality, color palette and rendering finish of the supplied character references. Ocean fantasy animated film aesthetic.\n\nThe same small coastal house interior at night. Foreground: dim wooden floor with open central space, shallow water basin visible at side. Middle distance: wooden bed, small table, water container, window with night sea view. Background: dark night sky and faint ocean through window, deep blue moonlit ambience outside.\n\nEye-level medium-wide interior composition, 16:9 cinematic framing. Low warm interior lamp-like fill mixed with cool blue moonlight from window frame right, strong contrast between cozy interior and dark sea outside.\n\nHand-painted animated night interior, same room layout as daytime variant, cinematic mood.\n\nClean empty background plate. No characters, people, animals, dragons, crowds, silhouettes, faces, readable signs, text, logos or watermarks.",
+      "negative_prompt": "characters, people, animals, dragons, crowd, silhouettes, faces, readable text, logo, watermark, sign, live-action, photorealistic, 3D render, blurry, low quality",
+      "continuity_notes": [
+        "Same room layout as BG_EP01_LUA_HOUSE_INTERIOR_DAY, night lighting variant",
+        "Window shows dark night sea for jellyfish reveal",
+        "Cool blue exterior vs warm dim interior",
+        "Bed and water basin positions unchanged"
+      ]
+    }
+  }
+}

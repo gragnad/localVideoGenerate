@@ -1,0 +1,345 @@
+{
+  "schema_version": 1,
+  "project_id": "RaisingaDragonSeason01",
+  "locations": {
+    "LOC_EP01_STORM_SEA_SURFACE_NIGHT": {
+      "location_id": "LOC_EP01_STORM_SEA_SURFACE_NIGHT",
+      "background_id": "BG_EP01_STORM_SEA_SURFACE_NIGHT",
+      "display_name": "Storm Sea Surface at Night",
+      "terrain": "Churning dark ocean surface with white foam and rain streaks",
+      "structures": "No buildings — open sea horizon under black storm clouds",
+      "time_of_day": "Night during violent storm",
+      "lighting": "Cold moonless storm light with cool-white lightning flashes from upper left",
+      "color_palette": "Deep blue-black sea, grey storm clouds, white foam highlights",
+      "fixed_elements": [
+        "Towering wave walls",
+        "Rain streaks",
+        "Distant lightning-lit horizon",
+        "Open central water performance space"
+      ],
+      "dynamic_entities": [],
+      "interactive_props": [],
+      "environment_props": [
+        "Spray and foam particles"
+      ],
+      "image_generation": {
+        "generation_prompt": "Premium stylized 3D animated feature-film environment plate, cinematic 16:9. Eye-level extreme wide shot facing open storm sea. Foreground: churning dark waves with white foam crests, diagonal rain streaks, and spray particles leaving a broad open performance space across the center water. Middle ground: towering wave walls rolling under heavy black storm clouds with lightning-lit edges. Background: distant lightning-lit horizon line and layered grey storm clouds receding into depth. Terrain is open ocean only with no land, structures, or vessels. Fixed elements include rain curtains, foam ribbons, and a cool-white lightning flash direction from upper left. Time of night during a violent moonless storm. Lighting comes from upper-left lightning and faint ambient bounce off wet wave surfaces. Palette: deep blue-black sea, grey storm clouds, white foam highlights, cold desaturated atmosphere. The plate is explicitly empty — no people, creatures, dragons, animals, boats, faces, silhouettes, props, text, or characters anywhere in frame.",
+        "negative_prompt": "people, characters, creatures, dragons, animals, faces, silhouettes, text, subtitles, watermark, logo, readable signs, duplicated structures, changing architecture, inconsistent lighting, distorted perspective, live action, photorealism, 3D render artifacts, blurry, low quality",
+        "suggested_filename": "BG_EP01_STORM_SEA_SURFACE_NIGHT.png",
+        "source_path": null,
+        "review_status": "pending",
+        "review_notes": [],
+        "sha256": null
+      }
+    },
+    "LOC_EP01_DEEP_SEA_RUINS_NIGHT": {
+      "location_id": "LOC_EP01_DEEP_SEA_RUINS_NIGHT",
+      "background_id": "BG_EP01_DEEP_SEA_RUINS_NIGHT",
+      "display_name": "Deep Sea Dragon Palace Ruins",
+      "terrain": "Deep underwater abyss with drifting marine snow",
+      "structures": "Cracked ancient coral palace pillar with bioluminescent blue veins",
+      "time_of_day": "Underwater night — no surface light",
+      "lighting": "Cold cyan ambient underwater fill, soft blue bioluminescence on coral",
+      "color_palette": "Dark teal abyss, cyan bioluminescent accents",
+      "fixed_elements": [
+        "Central open water space",
+        "Ruined coral architecture receding into depth",
+        "Marine snow particles"
+      ],
+      "dynamic_entities": [],
+      "interactive_props": [],
+      "environment_props": [
+        "Drifting sediment motes"
+      ],
+      "image_generation": {
+        "generation_prompt": "Premium stylized 3D animated feature-film environment plate, cinematic 16:9. Eye-level wide underwater shot looking into deep sea dragon palace ruins. Foreground: open drifting water with marine snow particles and a clear central performance volume for later character placement. Middle ground: a cracked ancient coral palace pillar with bioluminescent blue veins, chipped stone, and small debris drifting from the fracture. Background: dark teal abyss with faint silhouettes of more ruined coral architecture, broken arches, and collapsed hall fragments receding into depth. Terrain is deep underwater abyss with no surface storm visible. Structures are ruined coral palace remains only. Fixed elements include the central cracked pillar, drifting sediment motes, and soft caustic shimmer. Underwater night with no sunlight. Lighting is cold cyan ambient fill from above with soft blue bioluminescence on coral edges. Palette: dark teal abyss, cyan bioluminescent accents, muted sacred ruin tones. Explicitly empty — no people, creatures, dragons, animals, faces, silhouettes, props, or characters.",
+        "negative_prompt": "people, characters, creatures, dragons, animals, faces, silhouettes, text, subtitles, watermark, logo, readable signs, duplicated structures, changing architecture, inconsistent lighting, distorted perspective, live action, photorealism, 3D render artifacts, blurry, low quality",
+        "suggested_filename": "BG_EP01_DEEP_SEA_RUINS_NIGHT.png",
+        "source_path": null,
+        "review_status": "pending",
+        "review_notes": [],
+        "sha256": null
+      }
+    },
+    "LOC_EP01_DEEP_SEA_PURSUIT_CORRIDOR_EMPTY": {
+      "location_id": "LOC_EP01_DEEP_SEA_PURSUIT_CORRIDOR_EMPTY",
+      "background_id": "BG_EP01_DEEP_SEA_PURSUIT_CORRIDOR_EMPTY",
+      "display_name": "Deep Sea Pursuit Corridor",
+      "terrain": "Teal underwater corridor with diagonal ascent path",
+      "structures": "Faint ruined coral edges at sides, open channel center",
+      "time_of_day": "Underwater night",
+      "lighting": "Cold cyan ambient from above-left, deep teal abyss below",
+      "color_palette": "Teal water, cyan light beam, dark abyss",
+      "fixed_elements": [
+        "Diagonal blue light ascent path",
+        "Empty corridor — no living black water mass in background plate"
+      ],
+      "dynamic_entities": [
+        "Black Tide rendered as separate subject when present — not in background"
+      ],
+      "interactive_props": [],
+      "environment_props": [
+        "Faint coral ruin edges"
+      ],
+      "image_generation": {
+        "generation_prompt": "Premium stylized 3D animated feature-film environment plate, cinematic 16:9. Eye-level medium-wide underwater shot angled slightly upward along a deep teal corridor. Foreground: open teal water with a clear diagonal ascent path marked by a faint blue light beam leaving room for a small swimming subject later. Middle ground: wide open channel with faint ruined coral edges at both sides but no living black water mass. Background: deep abyss below fading to black with subtle particulate haze. Terrain is an underwater passage with no floor visible, only water volume. Structures are partial ruined coral wall edges framing the corridor. Fixed elements include the diagonal blue ascent light from upper left, side ruin silhouettes, and empty central channel. Underwater night. Lighting: cold cyan ambient from above-left and deep teal shadow below. Palette: teal water, cyan beam, dark abyss. Explicitly empty — no Black Tide, shadow creatures, dragons, people, animals, faces, silhouettes, props, or characters in the plate.",
+        "negative_prompt": "people, characters, creatures, dragons, animals, faces, silhouettes, text, subtitles, watermark, logo, readable signs, duplicated structures, changing architecture, inconsistent lighting, distorted perspective, live action, photorealism, 3D render artifacts, blurry, low quality",
+        "suggested_filename": "BG_EP01_DEEP_SEA_PURSUIT_CORRIDOR_EMPTY.png",
+        "source_path": null,
+        "review_status": "pending",
+        "review_notes": [],
+        "sha256": null
+      }
+    },
+    "LOC_EP01_MIR_VISION_PALACE_RUINS": {
+      "location_id": "LOC_EP01_MIR_VISION_PALACE_RUINS",
+      "background_id": "BG_EP01_MIR_VISION_PALACE_RUINS",
+      "display_name": "Mir Vision — Broken Dragon Palace",
+      "terrain": "Surreal floating debris over void abyss",
+      "structures": "Broken palace gate, ruined hall columns",
+      "time_of_day": "Dream-memory timeless",
+      "lighting": "Cold blue memory-light with deep black void, soft fog",
+      "color_palette": "Desaturated blue-grey, deep black void",
+      "fixed_elements": [
+        "Enormous sleeping dragon shadows as silhouettes without clear faces",
+        "Open central vision space",
+        "Slight dutch unsettling tilt"
+      ],
+      "dynamic_entities": [],
+      "interactive_props": [],
+      "environment_props": [
+        "Floating debris",
+        "Drifting dust motes"
+      ],
+      "image_generation": {
+        "generation_prompt": "Premium stylized 3D animated feature-film environment plate, cinematic 16:9. Eye-level wide shot with slight dutch unsettling tilt through a surreal memory void. Foreground: floating debris, dust motes, and open central vision space for later subject placement. Middle ground: broken dragon palace gate, fractured hall columns, and cracked floor fragments suspended over abyss. Background: endless black void with enormous sleeping dragon shadow silhouettes curled on ledges without readable faces or eyes. Terrain is surreal floating ruin fragments over void rather than solid ground. Structures are broken palace architecture in desaturated stone. Fixed elements include gate ruins, column rows, shadow silhouettes, fog, and drifting memory dust. Timeless dream-memory moment with no physical weather. Lighting: cold blue memory-light with deep black void and soft fog edges wrapping the ruins. Palette: desaturated blue-grey, deep black void, faint cyan accents, low saturation nightmare calm. Explicitly empty — no people, creatures, dragons with readable faces, animals, props, text, or characters in the plate.",
+        "negative_prompt": "people, characters, creatures, dragons, animals, faces, silhouettes, text, subtitles, watermark, logo, readable signs, duplicated structures, changing architecture, inconsistent lighting, distorted perspective, live action, photorealism, 3D render artifacts, blurry, low quality",
+        "suggested_filename": "BG_EP01_MIR_VISION_PALACE_RUINS.png",
+        "source_path": null,
+        "review_status": "pending",
+        "review_notes": [],
+        "sha256": null
+      }
+    },
+    "LOC_EP01_COASTAL_VILLAGE_MORNING": {
+      "location_id": "LOC_EP01_COASTAL_VILLAGE_MORNING",
+      "background_id": "BG_EP01_COASTAL_VILLAGE_MORNING",
+      "display_name": "Coastal Village Morning Shore",
+      "terrain": "Wet stone breakwater, damp sand",
+      "structures": "Overturned boats, tangled nets, broken wood; distant cliff with cave entrance",
+      "time_of_day": "Morning after storm",
+      "lighting": "Soft diffused morning sunlight from frame right, cool blue bounce on wet stone",
+      "color_palette": "Warm morning light on wet grey stone, soft post-storm sky",
+      "fixed_elements": [
+        "Wet breakwater with open standing area",
+        "Calm sea horizon",
+        "Distant cave cliff hint at background right"
+      ],
+      "dynamic_entities": [],
+      "interactive_props": [
+        "Lua's fishing spear when held by Lua"
+      ],
+      "environment_props": [
+        "Scattered wet rope at breakwater edges",
+        "Village repair debris on sand"
+      ],
+      "image_generation": {
+        "generation_prompt": "Premium stylized 3D animated feature-film environment plate, cinematic 16:9. Eye-level medium-wide shot from wet stone breakwater facing calm sea. Foreground: damp breakwater stones with scattered wet rope at edges and a clear open standing area at center for later character placement. Middle ground: overturned boats, tangled nets, broken wood, and village repair debris on damp sand without people. Background: soft post-storm morning sky, calm sea horizon, and distant cliff with cave entrance hint at far right. Terrain combines wet stone breakwater and damp beach sand. Structures are fishing village work-shore elements only. Fixed elements include breakwater edge, rope coils, boat hulls, and cliff silhouette. Morning after storm. Lighting: soft diffused sunlight from frame right with cool blue bounce on wet stone. Palette: warm morning light on grey wet stone, soft sky blues, gentle post-storm calm. Explicitly empty — no people, creatures, animals, faces, silhouettes, props held by characters, text, or characters.",
+        "negative_prompt": "people, characters, creatures, dragons, animals, faces, silhouettes, text, subtitles, watermark, logo, readable signs, duplicated structures, changing architecture, inconsistent lighting, distorted perspective, live action, photorealism, 3D render artifacts, blurry, low quality",
+        "suggested_filename": "BG_EP01_COASTAL_VILLAGE_MORNING.png",
+        "source_path": null,
+        "review_status": "pending",
+        "review_notes": [],
+        "sha256": null
+      }
+    },
+    "LOC_EP01_COASTAL_CAVE_INTERIOR": {
+      "location_id": "LOC_EP01_COASTAL_CAVE_INTERIOR",
+      "background_id": "BG_EP01_COASTAL_CAVE_INTERIOR",
+      "display_name": "Coastal Cave Interior",
+      "terrain": "Shallow seawater over uneven rock with reflective ripples",
+      "structures": "Damp stone walls with droplets, tunnel receding into shadow",
+      "time_of_day": "Daylight hint behind camera, cave interior cool",
+      "lighting": "Cool blue-teal ambient from cave depth, soft blue glow from deeper cave",
+      "color_palette": "Blue-teal wet stone, mystical blue light at depth",
+      "fixed_elements": [
+        "Central approach path through shallow water",
+        "Rocky crevices on walls",
+        "Blue glow stronger toward cave depth"
+      ],
+      "dynamic_entities": [],
+      "interactive_props": [
+        "Lua's fishing spear when held by Lua"
+      ],
+      "environment_props": [
+        "Water ripples on cave floor",
+        "Cave wall droplets"
+      ],
+      "image_generation": {
+        "generation_prompt": "Premium stylized 3D animated feature-film environment plate, cinematic 16:9. Eye-level medium shot looking from cave entrance toward deeper tunnel. Foreground: shallow seawater over uneven rock with reflective ripples and a clear central approach path for later character placement. Middle ground: damp stone walls with droplets, rocky crevices, and wet ledges catching soft blue light. Background: tunnel receding into shadow with stronger mystical blue glow from cave depth behind camera view. Terrain is wet cave floor with shallow water pools and uneven stone. Structures are natural stone cave walls and low ceiling with no built furniture. Fixed elements include water ripples, wall droplets, blue-teal ambient glow stronger toward depth, and daylight hint behind camera. Daytime exterior light outside with cool cave interior. Lighting: cool blue-teal ambient from depth plus faint daylight rim behind camera. Palette: blue-teal wet stone, soft cyan glow, dark recess shadows, moist coastal cave atmosphere. Explicitly empty — no people, creatures, dragons, animals, faces, silhouettes, props, or characters.",
+        "negative_prompt": "people, characters, creatures, dragons, animals, faces, silhouettes, text, subtitles, watermark, logo, readable signs, duplicated structures, changing architecture, inconsistent lighting, distorted perspective, live action, photorealism, 3D render artifacts, blurry, low quality",
+        "suggested_filename": "BG_EP01_COASTAL_CAVE_INTERIOR.png",
+        "source_path": null,
+        "review_status": "pending",
+        "review_notes": [],
+        "sha256": null
+      }
+    },
+    "LOC_EP01_LUA_HOUSE_INTERIOR_DAY": {
+      "location_id": "LOC_EP01_LUA_HOUSE_INTERIOR_DAY",
+      "background_id": "BG_EP01_LUA_HOUSE_INTERIOR_DAY",
+      "display_name": "Lua's House Interior — Day",
+      "terrain": "Wooden floor",
+      "structures": "Humble coastal house: wooden bed, small table, water basin, window with daylight",
+      "time_of_day": "Daytime",
+      "lighting": "Warm daylight from window",
+      "color_palette": "Warm wood tones, soft daylight fill",
+      "fixed_elements": [
+        "Shallow water basin at consistent side position",
+        "Wooden bed and table in fixed layout",
+        "Window with daylight view"
+      ],
+      "dynamic_entities": [],
+      "interactive_props": [
+        "Pale cream coastal comfort shell on table — Mir's preferred object, not worn by any character",
+        "Dried fish on table — environment food prop",
+        "Water jar on table"
+      ],
+      "environment_props": [
+        "Shells scattered on table",
+        "Cloth for hiding wrist mark"
+      ],
+      "image_generation": {
+        "generation_prompt": "Premium stylized 3D animated feature-film environment plate, cinematic 16:9. Eye-level medium-wide interior shot of a humble coastal house room. Foreground: wooden floor boards with open floor space for later character placement. Middle ground: wooden bed, small table, and shallow water basin at consistent side positions without occupants. Background: window with warm daylight view and simple wall planks. Terrain is flat wooden floor with worn coastal texture. Structures include bed frame, table, basin, and window frame in fixed layout continuity. Fixed elements: basin at consistent side, table with scattered shells and dried fish as environment props only, water jar, cloth scrap, and daylight through window. Daytime with soft coastal sunlight. Lighting: warm daylight from window with gentle interior fill and soft shadow under furniture. Palette: warm wood tones, cream shells, soft daylight yellows and gentle brown shadows. Explicitly empty — no people, creatures, dragons, animals, faces, silhouettes, held props, or characters.",
+        "negative_prompt": "people, characters, creatures, dragons, animals, faces, silhouettes, text, subtitles, watermark, logo, readable signs, duplicated structures, changing architecture, inconsistent lighting, distorted perspective, live action, photorealism, 3D render artifacts, blurry, low quality",
+        "suggested_filename": "BG_EP01_LUA_HOUSE_INTERIOR_DAY.png",
+        "source_path": null,
+        "review_status": "pending",
+        "review_notes": [],
+        "sha256": null
+      }
+    },
+    "LOC_EP01_LUA_HOUSE_IMAGINED_VILLAGE": {
+      "location_id": "LOC_EP01_LUA_HOUSE_IMAGINED_VILLAGE",
+      "background_id": "BG_EP01_LUA_HOUSE_IMAGINED_VILLAGE",
+      "display_name": "Imagined Village Rejection Overlay",
+      "terrain": "Open wooden floor blending into ghostly sand at edges",
+      "structures": "Blurred village shore shapes without readable faces",
+      "time_of_day": "Dream overlay — desaturated",
+      "lighting": "Cold desaturated light with faint red anxiety tint, dreamlike soft edges",
+      "color_palette": "Washed-out grey-blue, desaturated nightmare tint",
+      "fixed_elements": [
+        "No distinct adult faces visible",
+        "Ghostly baskets and rope at edges",
+        "Returns to literal house day lighting after beat"
+      ],
+      "dynamic_entities": [],
+      "interactive_props": [],
+      "environment_props": [
+        "Blurred shore suggestion",
+        "Desaturated overlay"
+      ],
+      "image_generation": {
+        "generation_prompt": "Premium stylized 3D animated feature-film environment plate, cinematic 16:9. Eye-level medium interior shot of the same humble house room overlaid with a fearful dream tint. Foreground: open wooden floor blending into ghostly sand at the edges with clear center space for characters later. Middle ground: blurred village shore shapes, ghostly baskets, and rope coils at frame edges without readable adult faces. Background: washed-out house walls and window light diffused into desaturated fog. Terrain mixes literal wooden floor with imagined shore blur at the periphery. Structures include faint house bed and table silhouettes plus ghostly village forms dissolving into mist. Fixed elements: desaturated overlay, edge blur, no distinct adult faces, ghost props at periphery, and anxiety-red tint in shadow corners. Dream overlay time with unstable edges. Lighting: cold desaturated light with faint red anxiety tint and soft dreamlike edges. Palette: washed-out grey-blue, muted nightmare tint, low saturation, faint rose shadow. Explicitly empty — no people, creatures, readable faces, animals, silhouettes with identity, or characters.",
+        "negative_prompt": "people, characters, creatures, dragons, animals, faces, silhouettes, text, subtitles, watermark, logo, readable signs, duplicated structures, changing architecture, inconsistent lighting, distorted perspective, live action, photorealism, 3D render artifacts, blurry, low quality",
+        "suggested_filename": "BG_EP01_LUA_HOUSE_IMAGINED_VILLAGE.png",
+        "source_path": null,
+        "review_status": "pending",
+        "review_notes": [],
+        "sha256": null
+      }
+    },
+    "LOC_EP01_LUA_HOUSE_INTERIOR_NIGHT": {
+      "location_id": "LOC_EP01_LUA_HOUSE_INTERIOR_NIGHT",
+      "background_id": "BG_EP01_LUA_HOUSE_INTERIOR_NIGHT",
+      "display_name": "Lua's House Interior — Night",
+      "terrain": "Dim wooden floor",
+      "structures": "Same layout as day: bed, basin, table, window facing night sea",
+      "time_of_day": "Night",
+      "lighting": "Low warm interior fill mixed with cool blue moonlight from window frame right",
+      "color_palette": "Warm interior shadows, cool blue moonlight on window side",
+      "fixed_elements": [
+        "Bed and basin positions match day variant",
+        "Window with night sea view"
+      ],
+      "dynamic_entities": [],
+      "interactive_props": [],
+      "environment_props": [
+        "Water basin",
+        "Bed linens"
+      ],
+      "image_generation": {
+        "generation_prompt": "Premium stylized 3D animated feature-film environment plate, cinematic 16:9. Eye-level medium-wide interior night shot matching the day house layout. Foreground: dim wooden floor with open space for later character placement. Middle ground: wooden bed, small table, and shallow water basin in the same fixed positions as the day variant. Background: window facing dark night sea with cool moonlight rim. Terrain is wooden floor with soft worn planks. Structures: bed, table, basin, window in unchanged layout continuity. Fixed elements include bed linens, basin water surface, table edge, window frame with night sea view, and faint interior lamp glow near the table edge. Nighttime with quiet coastal house atmosphere and distant sea hush beyond the window. Lighting: low warm interior fill mixed with cool blue moonlight from window at frame right. Palette: warm interior shadows, cool blue moonlight accents, deep night tones, soft amber bedside darkness. Explicitly empty — no people, creatures, dragons, animals, faces, silhouettes, or characters.",
+        "negative_prompt": "people, characters, creatures, dragons, animals, faces, silhouettes, text, subtitles, watermark, logo, readable signs, duplicated structures, changing architecture, inconsistent lighting, distorted perspective, live action, photorealism, 3D render artifacts, blurry, low quality",
+        "suggested_filename": "BG_EP01_LUA_HOUSE_INTERIOR_NIGHT.png",
+        "source_path": null,
+        "review_status": "pending",
+        "review_notes": [],
+        "sha256": null
+      }
+    },
+    "LOC_EP01_NIGHT_SEA_EMPTY_FROM_WINDOW": {
+      "location_id": "LOC_EP01_NIGHT_SEA_EMPTY_FROM_WINDOW",
+      "background_id": "BG_EP01_NIGHT_SEA_EMPTY_FROM_WINDOW",
+      "display_name": "Night Sea View from Window",
+      "terrain": "Dark calm sea surface with gentle ripples",
+      "structures": "Minimal window frame edge at foreground",
+      "time_of_day": "Night",
+      "lighting": "Cool blue moonlight on sea, unnaturally still atmosphere",
+      "color_palette": "Deep night blue sea, faint stars",
+      "fixed_elements": [
+        "Completely empty sea surface in background plate",
+        "Elevated coastal house window perspective"
+      ],
+      "dynamic_entities": [
+        "Black Jellyfish as separate subject when present — not duplicated in background plate"
+      ],
+      "interactive_props": [],
+      "environment_props": [
+        "Window frame edge optional at sides"
+      ],
+      "image_generation": {
+        "generation_prompt": "Premium stylized 3D animated feature-film environment plate, cinematic 16:9. Elevated eye-level medium-wide shot from a coastal house window toward the night sea. Foreground: minimal window frame edge at sides leaving open view space. Middle ground: dark calm sea surface with gentle ripples and open water for later creature placement as separate subject. Background: faint stars and deep night horizon with unnaturally still atmosphere and no vessels. Terrain is open sea surface only beneath a clear night sky. Structures limited to partial interior window frame edges and faint sill shadow. Fixed elements: empty sea surface, moonlit ripple pattern, faint star field, still air, and elevated coastal house window perspective. Night with quiet ominous calm. Lighting: cool blue moonlight on sea with soft interior darkness at frame edges. Palette: deep night blue sea, silver moon highlights, black sky, subtle interior warmth at frame sides. Explicitly empty — no jellyfish, people, creatures, dragons, animals, faces, silhouettes, boats, or characters in the background plate.",
+        "negative_prompt": "people, characters, creatures, dragons, animals, faces, silhouettes, text, subtitles, watermark, logo, readable signs, duplicated structures, changing architecture, inconsistent lighting, distorted perspective, live action, photorealism, 3D render artifacts, blurry, low quality",
+        "suggested_filename": "BG_EP01_NIGHT_SEA_EMPTY_FROM_WINDOW.png",
+        "source_path": null,
+        "review_status": "pending",
+        "review_notes": [],
+        "sha256": null
+      }
+    },
+    "LOC_EP01_COASTAL_CAVE_TOWARD_MOUTH": {
+      "location_id": "LOC_EP01_COASTAL_CAVE_TOWARD_MOUTH",
+      "background_id": "BG_EP01_COASTAL_CAVE_TOWARD_MOUTH",
+      "display_name": "Coastal Cave — Toward Mouth Exit",
+      "terrain": "Shallow seawater over uneven wet rock leading toward bright exit",
+      "structures": "Natural stone cave walls narrowing toward daylight mouth opening",
+      "time_of_day": "Daytime — exterior daylight through cave mouth",
+      "lighting": "Strong daylight from cave mouth ahead, cool blue-teal ambient from deeper cave behind camera",
+      "color_palette": "Warm daylight at mouth, blue-teal interior shadow, wet stone greys",
+      "fixed_elements": [
+        "Bright cave mouth opening centered ahead",
+        "Central wet-rock walking path toward exit",
+        "Cool blue shadow in deeper cave behind camera",
+        "Reflective shallow pools on cave floor"
+      ],
+      "dynamic_entities": [],
+      "interactive_props": [
+        "Lua's fishing spear when held by Lua"
+      ],
+      "environment_props": [
+        "Water ripples",
+        "Wall droplets catching daylight"
+      ],
+      "image_generation": {
+        "generation_prompt": "Premium stylized 3D animated feature-film environment plate, cinematic 16:9. Eye-level medium-wide reverse shot from deeper inside the coastal cave looking toward the bright cave mouth and daylight exit ahead. Foreground: shallow seawater over uneven wet rock with a clear central walking path opening toward the glowing exit for later character placement. Middle ground: damp stone walls narrowing toward the mouth, droplets catching daylight, and wet floor reflections. Background: bright overexposed daylight through the cave mouth opening with soft coastal haze outside, while cool blue-teal shadow remains behind the camera in the deeper cave. Terrain is wet cave floor with shallow pools. Structures are natural stone cave walls forming a tunnel toward exit. Fixed elements include the luminous mouth opening, wet rock path, wall crevices, and reflective puddles. Daytime with exterior daylight through mouth. Lighting: strong forward daylight from mouth center and cool blue ambient fill from deeper cave behind camera. Palette: warm daylight white at mouth, blue-teal interior shadow, wet stone greys. Explicitly empty — no people, creatures, dragons, animals, faces, silhouettes, props, or characters.",
+        "negative_prompt": "people, characters, creatures, dragons, animals, faces, silhouettes, text, subtitles, watermark, logo, readable signs, duplicated structures, changing architecture, inconsistent lighting, distorted perspective, live action, photorealism, 3D render artifacts, blurry, low quality",
+        "suggested_filename": "BG_EP01_COASTAL_CAVE_TOWARD_MOUTH.png",
+        "source_path": null,
+        "review_status": "pending",
+        "review_notes": [],
+        "sha256": null
+      }
+    }
+  }
+}

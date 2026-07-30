@@ -1,0 +1,49 @@
+{
+  "schema_version": 3,
+  "project_id": "RaisingaDragonSeason01_EP01_MSR_CONTINUITY_V1",
+  "title": "용 키우기 EP01 — MSR 연속 생성 V1",
+  "description": "EP01 source-scenario rewrite for clean-slate MSR continuity generation.",
+  "scenario_source": "RaisingaDragonSeason01/Raising a Dragon.md",
+  "episode_coverage": [
+    "EP01"
+  ],
+  "workflow": "msr_sequence_v2",
+  "prompt_strategy": "msr_continuity_v1",
+  "director_prompt_inheritance": false,
+  "policy": {
+    "fps": 24,
+    "max_clip_seconds": 20,
+    "max_primary_characters": 2,
+    "reference_slots": {
+      "1": "character_1",
+      "2": "character_2",
+      "3": "prop_3",
+      "4": "prop_4"
+    },
+    "anchor_model": "one integrated anchor per generation unit",
+    "language": "English visual/action prompts; Korean spoken dialogue only"
+  },
+  "scene_count": 5,
+  "clip_count": 23,
+  "total_requested_seconds": 380,
+  "scene_requested_seconds": {
+    "SC01-001": 80,
+    "SC01-002": 77,
+    "SC01-003": 101,
+    "SC01-004": 53,
+    "SC01-005": 69
+  },
+  "new_anchor_count": 18,
+  "continuity_frame_count": 5,
+  "status_summary": {
+    "awaiting_background": 23,
+    "reviewed": 0,
+    "invalid": 0
+  },
+  "notes": [
+    "Built from RaisingaDragonSeason01/Raising a Dragon.md only.",
+    "Legacy Director and MSR prompt projects were not used as prompt sources.",
+    "Village child dialogue is split into Lua+Child1 and Lua+Child2 cuts to respect the two-character MSR limit.",
+    "SC01-002_M04 is the 15-second Lua+Old Fisherman scene covering the warning dialogue."
+  ]
+}

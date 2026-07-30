@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "project_id": "RaisingaDragonSeason01",
+  "title": "용 키우기 시즌 1",
+  "description": "EP01 바다에서 주운 용 — MSR V2 프롬프트 프로젝트",
+  "scenario_source": "RaisingaDragonSeason01/Raising a Dragon.md",
+  "episode_coverage": ["EP01"],
+  "notes": [
+    "배경 전용 PNG는 prompt_projects/RaisingaDragonSeason01/backgrounds/ 에 저장합니다.",
+    "background_links.json에서 background_id와 파일 연결을 관리하며 Markdown 원본은 덮어쓰지 않습니다.",
+    "배경이 없는 클립은 awaiting_background 상태입니다. needs_confirmation은 시나리오·Reference 매핑 모호 시에만 사용합니다."
+  ]
+}

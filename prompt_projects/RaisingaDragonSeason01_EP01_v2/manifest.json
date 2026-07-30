@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "project_id": "RaisingaDragonSeason01_EP01_v2",
+  "title": "Raising a Dragon Season 1 — EP01 V2",
+  "description": "EP01 바다에서 주운 용 — MSR V2 prompt project rewrite (English visual prompts, Korean dialogue preserved)",
+  "scenario_source": "RaisingaDragonSeason01/Raising a Dragon.md",
+  "episode_coverage": [
+    "EP01"
+  ],
+  "supersedes_project": "RaisingaDragonSeason01",
+  "policy": {
+    "language": "English visual prompts; Korean spoken dialogue only",
+    "max_clip_seconds": 30,
+    "target_clip_seconds": "18-28",
+    "target_total_seconds_range": [
+      330,
+      420
+    ]
+  },
+  "scene_count": 5,
+  "clip_count": 19,
+  "total_requested_seconds": 396,
+  "scene_requested_seconds": {
+    "SC01-001": 100,
+    "SC01-002": 44,
+    "SC01-003": 90,
+    "SC01-004": 82,
+    "SC01-005": 80
+  },
+  "status_summary": {
+    "reviewed": 0,
+    "awaiting_background": 19,
+    "needs_confirmation": 0,
+    "invalid": 0
+  },
+  "notes": [
+    "V2 rewrite — original RaisingaDragonSeason01 project preserved untouched.",
+    "All clips awaiting_background until background PNGs are linked.",
+    "Reference PNGs must exist under RaisingaDragonSeason01/ for reviewed status.",
+    "Split cold open, dream, and imagination beats into separate backgrounds."
+  ]
+}

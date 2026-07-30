@@ -375,6 +375,10 @@ class CandidatePipelineTest(unittest.TestCase):
             with patch.object(worker, "get_comfy_queue_state", return_value=(True, 0, 0, None)):
                 completed = worker.maybe_finalize_open_batch()
         self.assertEqual(completed["status"], "awaiting_candidate_selection")
+        self.assertEqual(
+            ui_backend.load_candidate_set(first["candidate_set_id"])["status"],
+            "awaiting_candidate_selection",
+        )
         self.assertEqual(batch_manager.load_batch(self.root, second["batch_id"])["status"], "open")
 
     @patch("ui_backend.probe_video", return_value={"duration_seconds": 12.0, "width": 1536, "height": 864, "fps": 24})

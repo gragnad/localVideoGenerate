@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "project_id": "RaisingaDragonSeason01",
+  "links": {
+    "BG_EP01_COASTAL_VILLAGE_MORNING": {
+      "filename": "BG_EP01_COASTAL_VILLAGE_MORNING.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01/backgrounds/BG_EP01_COASTAL_VILLAGE_MORNING.png",
+      "linked_at": "2026-07-27T13:34:52.545526+00:00",
+      "review_status": "changes_required",
+      "reviewed_at": "2026-07-27T13:45:00+00:00",
+      "review_notes": [
+        "장소, 폭풍 직후 아침, 빈 행동 공간과 고정 소품은 시나리오에 부합합니다.",
+        "사진에 가까운 실사 렌더링으로 캐릭터 레퍼런스의 스타일라이즈드 애니메이션 작화와 일치하지 않습니다. 동일 구도를 유지하되 hand-painted feature-film animation 스타일로 다시 생성해야 합니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": false,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      }
+    },
+    "BG_EP01_STORM_DEEP_SEA_NIGHT": {
+      "filename": "BG_EP01_STORM_DEEP_SEA_NIGHT.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01/backgrounds/BG_EP01_STORM_DEEP_SEA_NIGHT.png",
+      "linked_at": "2026-07-27T13:38:58.738817+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T13:45:00+00:00",
+      "review_notes": [
+        "폭풍 밤바다와 심해 용궁 폐허가 한 프레임에서 자연스럽게 연결되고 중앙 행동 공간이 확보되어 있습니다.",
+        "냉색 번개, 청록 심해광, 무인 clean plate, 16:9 구도가 요구사항과 일치합니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      }
+    },
+    "BG_EP01_COASTAL_CAVE_INTERIOR": {
+      "filename": "BG_EP01_COASTAL_CAVE_INTERIOR.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01/backgrounds/BG_EP01_COASTAL_CAVE_INTERIOR.png",
+      "linked_at": "2026-07-27T13:41:02.582851+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T13:45:00+00:00",
+      "review_notes": [
+        "젖은 암벽, 얕은 바닷물, 동굴 안쪽 푸른빛과 중앙 접근 동선이 시나리오에 부합합니다.",
+        "인물·동물·문자 없이 MSR 캐릭터 배치가 가능한 clean plate입니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      }
+    },
+    "BG_EP01_LUA_HOUSE_INTERIOR_DAY": {
+      "filename": "BG_EP01_LUA_HOUSE_INTERIOR_DAY.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01/backgrounds/BG_EP01_LUA_HOUSE_INTERIOR_DAY.png",
+      "linked_at": "2026-07-27T13:43:22.843131+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T13:45:00+00:00",
+      "review_notes": [
+        "침대, 탁자, 물그릇, 마른 생선, 조개와 그물이 시나리오의 집 내부 소품과 일치합니다.",
+        "따뜻한 낮 조명과 중앙의 빈 행동 공간이 확보된 애니메이션 background plate입니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      }
+    },
+    "BG_EP01_LUA_HOUSE_INTERIOR_NIGHT": {
+      "filename": "BG_EP01_LUA_HOUSE_INTERIOR_NIGHT.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01/backgrounds/BG_EP01_LUA_HOUSE_INTERIOR_NIGHT.png",
+      "linked_at": "2026-07-27T14:00:34.410383+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T14:50:00+00:00",
+      "review_notes": [
+        "창문 좌측·침대 우측·물그릇 좌하단·탁자 창가 배치가 낮 배경과 동일한 레이아웃을 유지합니다.",
+        "달빛 바다 뷰와 차가운 외광·따뜻한 실내 그림자가 야간 장면 요구와 일치하며 clean plate입니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      },
+      "replaced_at": "2026-07-27T14:00:34.410393+00:00",
+      "previous_review_notes": [
+        "밤 시간대, 창밖 바다, 차가운 외광과 따뜻한 실내광은 장면 요구와 일치합니다.",
+        "낮 배경과 침대·창문·탁자·물그릇의 위치 및 방 구조가 크게 달라 같은 집의 야간 변형으로 이어지지 않습니다. 낮 배경의 정확한 구조를 유지한 night lighting variant로 다시 생성해야 합니다."
+      ]
+    }
+  },
+  "updated_at": "2026-07-27T14:00:34.410399+00:00"
+}

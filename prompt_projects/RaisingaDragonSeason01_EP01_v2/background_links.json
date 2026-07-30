@@ -1,0 +1,235 @@
+{
+  "schema_version": 1,
+  "project_id": "RaisingaDragonSeason01_EP01_v2",
+  "links": {
+    "BG_EP01_COASTAL_VILLAGE_MORNING": {
+      "filename": "BG_EP01_COASTAL_VILLAGE_MORNING.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01_EP01_v2/backgrounds/BG_EP01_COASTAL_VILLAGE_MORNING.png",
+      "linked_at": "2026-07-27T14:41:06.672268+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T14:55:00+00:00",
+      "review_notes": [
+        "폭풍 직후 아침 항구, 방파제 중앙 행동 공간, 뒤집힌 배·그물, 원거리 동굴 절벽이 시나리오에 부합합니다.",
+        "hand-painted feature-film animation 스타일로 전환되어 캐릭터 레퍼런스와 일치하며 clean plate·16:9 구도가 적합합니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      },
+      "replaced_at": "2026-07-27T14:41:06.672277+00:00",
+      "previous_review_notes": [
+        "폭풍 직후 아침 항구, 방파제 중앙 행동 공간, 원거리 동굴 절벽 등 장면 구성은 시나리오에 부합합니다.",
+        "사진·3D CG에 가까운 실사 렌더링으로 캐릭터 레퍼런스의 hand-painted feature-film animation 스타일과 일치하지 않습니다. 동일 구도를 유지하되 스타일라이즈드 애니메이션 작화로 다시 생성해야 합니다."
+      ]
+    },
+    "BG_EP01_COASTAL_CAVE_INTERIOR": {
+      "filename": "BG_EP01_COASTAL_CAVE_INTERIOR.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01_EP01_v2/backgrounds/BG_EP01_COASTAL_CAVE_INTERIOR.png",
+      "linked_at": "2026-07-27T14:34:45.536118+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T14:50:00+00:00",
+      "review_notes": [
+        "젖은 암벽, 얕은 바닷물, 동굴 안쪽 푸른빛과 중앙 접근 동선이 시나리오에 부합합니다.",
+        "인물·동물·문자 없이 MSR 캐릭터 배치가 가능한 clean plate이며 애니메이션 background plate 스타일과 일치합니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      },
+      "replaced_at": "2026-07-27T14:34:45.536127+00:00"
+    },
+    "BG_EP01_DEEP_SEA_BLACK_CURRENT": {
+      "filename": "BG_EP01_DEEP_SEA_BLACK_CURRENT.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01_EP01_v2/backgrounds/BG_EP01_DEEP_SEA_BLACK_CURRENT.png",
+      "linked_at": "2026-07-27T14:34:47.765936+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T14:50:00+00:00",
+      "review_notes": [
+        "살아 있는 검은 해류, 손·그림자 형태, 보라색 심연광과 청록 상승 경로가 시나리오의 공포 비트에 부합합니다.",
+        "hand-painted animated underwater horror 배경으로 심해 팔레트와 연속성이 ruins 클립과 자연스럽게 이어집니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      },
+      "replaced_at": "2026-07-27T14:34:47.765943+00:00"
+    },
+    "BG_EP01_DEEP_SEA_RUINS_NIGHT": {
+      "filename": "BG_EP01_DEEP_SEA_RUINS_NIGHT.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01_EP01_v2/backgrounds/BG_EP01_DEEP_SEA_RUINS_NIGHT.png",
+      "linked_at": "2026-07-27T14:34:49.419251+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T14:50:00+00:00",
+      "review_notes": [
+        "붕괴된 용궁 기둥, 생물발광 청록색, marine snow와 중앙 개방 수역이 심해 폐허 장면 요구와 일치합니다.",
+        "표면 폭풍 없이 심해만 표현되었고 clean plate·16:9 구도·애니메이션 작화가 적합합니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      },
+      "replaced_at": "2026-07-27T14:34:49.419260+00:00"
+    },
+    "BG_EP01_LUA_HOUSE_IMAGINED_VILLAGE": {
+      "filename": "BG_EP01_LUA_HOUSE_IMAGINED_VILLAGE.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01_EP01_v2/backgrounds/BG_EP01_LUA_HOUSE_IMAGINED_VILLAGE.png",
+      "linked_at": "2026-07-27T14:34:50.949697+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T14:50:00+00:00",
+      "review_notes": [
+        "탈채된 마을 해변, 바구니·밧줄·배 등이 공포 기억 오버레이로 읽히며 식별 가능한 얼굴·주민이 없습니다.",
+        "가장자리 적색 불안 틴트와 desaturated palette가 literal house day bg와 구분되며, 마을 거부 공포 장면에 사용 가능합니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      },
+      "replaced_at": "2026-07-27T14:34:50.949704+00:00"
+    },
+    "BG_EP01_LUA_HOUSE_INTERIOR_DAY": {
+      "filename": "BG_EP01_LUA_HOUSE_INTERIOR_DAY.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01_EP01_v2/backgrounds/BG_EP01_LUA_HOUSE_INTERIOR_DAY.png",
+      "linked_at": "2026-07-27T14:34:54.061893+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T14:50:00+00:00",
+      "review_notes": [
+        "침대, 탁자, 물그릇, 마른 생선, 조개와 그물이 시나리오의 집 내부 소품과 일치합니다.",
+        "따뜻한 낮 조명과 중앙의 빈 행동 공간이 확보된 애니메이션 background plate입니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      },
+      "replaced_at": "2026-07-27T14:34:54.061899+00:00"
+    },
+    "BG_EP01_LUA_HOUSE_INTERIOR_NIGHT": {
+      "filename": "BG_EP01_LUA_HOUSE_INTERIOR_NIGHT.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01_EP01_v2/backgrounds/BG_EP01_LUA_HOUSE_INTERIOR_NIGHT.png",
+      "linked_at": "2026-07-27T14:39:31.953858+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T14:55:00+00:00",
+      "review_notes": [
+        "창문 좌측, 침대 후벽 중앙, 물그릇 좌하단, 탁자 우측·생선 배치가 낮 배경과 동일한 레이아웃을 유지합니다.",
+        "달빛 바다 뷰, 차가운 외광과 어두운 실내 그림자가 야간 장면 요구와 일치하며 clean plate입니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      },
+      "replaced_at": "2026-07-27T14:39:31.953865+00:00",
+      "previous_review_notes": [
+        "밤 시간대, 창밖 바다, 차가운 외광과 따뜻한 실내광은 장면 요구와 일치합니다.",
+        "낮 배경(BG_EP01_LUA_HOUSE_INTERIOR_DAY)과 창문 위치(좌→우), 침대·탁자 배치, 방 구조가 크게 달라 같은 집의 야간 변형으로 이어지지 않습니다. 낮 배경의 정확한 레이아웃을 유지한 night lighting variant로 다시 생성해야 합니다."
+      ]
+    },
+    "BG_EP01_MIR_VISION_PALACE_RUINS": {
+      "filename": "BG_EP01_MIR_VISION_PALACE_RUINS.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01_EP01_v2/backgrounds/BG_EP01_MIR_VISION_PALACE_RUINS.png",
+      "linked_at": "2026-07-27T14:34:57.357088+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T14:50:00+00:00",
+      "review_notes": [
+        "붕괴된 용궁 문·기둥, 공중에 떠 있는 파편, 깊은 검은 심연이 vision/dream 공간으로 적합합니다.",
+        "cold blue memory-light와 desaturated dream palette가 S#1 vision·S#5 nightmare 재사용에 일관됩니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      },
+      "replaced_at": "2026-07-27T14:34:57.357097+00:00"
+    },
+    "BG_EP01_NIGHT_SEA_JELLYFISH": {
+      "filename": "BG_EP01_NIGHT_SEA_JELLYFISH.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01_EP01_v2/backgrounds/BG_EP01_NIGHT_SEA_JELLYFISH.png",
+      "linked_at": "2026-07-27T14:34:59.010652+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T14:50:00+00:00",
+      "review_notes": [
+        "창틀 가장자리, 달빛 반사 바다, 중앙의 검은 반투명 해파리가 SC01-005 해파리 비트에 부합합니다.",
+        "단일 해파리·무인 clean plate·hand-painted night seascape 스타일이 요구사항과 일치합니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      },
+      "replaced_at": "2026-07-27T14:34:59.010661+00:00"
+    },
+    "BG_EP01_STORM_SEA_SURFACE_NIGHT": {
+      "filename": "BG_EP01_STORM_SEA_SURFACE_NIGHT.png",
+      "source_path": "prompt_projects/RaisingaDragonSeason01_EP01_v2/backgrounds/BG_EP01_STORM_SEA_SURFACE_NIGHT.png",
+      "linked_at": "2026-07-27T14:35:01.093298+00:00",
+      "review_status": "approved",
+      "reviewed_at": "2026-07-27T14:50:00+00:00",
+      "review_notes": [
+        "폭풍 밤바다 표면만 표현되었고 거대 파도·번개·비가 cold open에 적합합니다.",
+        "중앙 개방 수면, 좌상단 번개, 심해/폐허 요소 없음 — surface-only 분리 요구와 일치합니다."
+      ],
+      "review_checklist": {
+        "scenario_location": true,
+        "time_and_lighting": true,
+        "camera_composition": true,
+        "clear_action_space": true,
+        "clean_background_plate": true,
+        "animation_style_match": true,
+        "continuity": true,
+        "no_readable_text_or_logo": true
+      },
+      "replaced_at": "2026-07-27T14:35:01.093308+00:00"
+    }
+  },
+  "updated_at": "2026-07-27T14:55:00+00:00"
+}

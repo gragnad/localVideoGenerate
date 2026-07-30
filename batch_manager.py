@@ -360,10 +360,21 @@ def mark_batch_generation_complete(
     ]
 
     if candidate_job_ids and not review_job_ids:
-        status = "awaiting_candidate_selection"
-        stage = "candidate_generation_complete"
-        next_stage = "user_candidate_selection"
-        message = "후보 생성이 완료되었습니다. 사용자가 최종 후보를 선택할 때까지 대기합니다."
+        candidate_statuses = job_statuses_for_batch(engine_root / "jobs", batch)
+        completed_candidates = [
+            job_id for job_id in candidate_job_ids
+            if candidate_statuses.get(job_id) == "completed"
+        ]
+        if completed_candidates:
+            status = "awaiting_candidate_selection"
+            stage = "candidate_generation_complete"
+            next_stage = "user_candidate_selection"
+            message = "후보 생성이 완료되었습니다. 사용자가 최종 후보를 선택할 때까지 대기합니다."
+        else:
+            status = "failed"
+            stage = "candidate_generation_failed"
+            next_stage = "retry_generation"
+            message = "모든 후보 생성이 실패했습니다. 오류를 수정한 뒤 후보군을 다시 등록하세요."
     elif auto_review and review_job_ids:
         status = "ready_for_review_preparation"
         stage = "generation_batch_complete"

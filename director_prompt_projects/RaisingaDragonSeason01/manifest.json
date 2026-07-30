@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "project_id": "RaisingaDragonSeason01",
+  "title": "Raising a Dragon Season 1 — EP01 Director Prompts",
+  "description": "LTX Director Prompt Relay project for EP01. Scene-image-based segments converted from RaisingaDragonSeason01_EP01_v4 with identity locks, Korean dialogue preservation, and 1280x704 at 24fps.",
+  "scenario_source": "RaisingaDragonSeason01/Raising a Dragon.md",
+  "episode_coverage": [
+    "EP01"
+  ],
+  "source_msr_project": "RaisingaDragonSeason01_EP01_v4",
+  "policy": {
+    "workflow": "director_prompt_v1",
+    "language": "English visual prompts; Korean spoken dialogue only",
+    "max_clip_seconds": 30,
+    "resolution": {
+      "width": 1280,
+      "height": 704
+    },
+    "fps": 24,
+    "character_identity_registry": "character_identity_registry.json",
+    "location_registry": "location_registry.json"
+  },
+  "scene_count": 5,
+  "clip_count": 24,
+  "segment_count": 89,
+  "total_requested_seconds": 412,
+  "scene_requested_seconds": {
+    "SC01-001": 90,
+    "SC01-002": 48,
+    "SC01-003": 130,
+    "SC01-004": 74,
+    "SC01-005": 70
+  },
+  "status_summary": {
+    "awaiting_scene_images": 24
+  },
+  "notes": [
+    "Converted from RaisingaDragonSeason01_EP01_v4 — MSR projects preserved untouched.",
+    "All clips prompt_review approved; scene images pending user generation.",
+    "SC01-004_02 uses awaiting_scene_images with detailed comfort-shell scene_image prompts.",
+    "89 segment scene images required across 24 clips."
+  ]
+}

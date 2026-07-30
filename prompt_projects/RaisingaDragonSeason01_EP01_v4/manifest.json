@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "project_id": "RaisingaDragonSeason01_EP01_v4",
+  "title": "Raising a Dragon Season 1 — EP01 V4",
+  "description": "EP01 바다에서 주운 용 — MSR V4 prompt project with Object References, Identity Lock, Character Identity Registry, LTX-style relay prompts, anatomy separation, and background/dynamic entity split",
+  "scenario_source": "RaisingaDragonSeason01/Raising a Dragon.md",
+  "episode_coverage": [
+    "EP01"
+  ],
+  "supersedes_project": "RaisingaDragonSeason01_EP01_v3",
+  "policy": {
+    "language": "English visual prompts; Korean spoken dialogue only",
+    "max_clip_seconds": 30,
+    "target_clip_seconds": "10-26",
+    "target_total_seconds_range": [
+      330,
+      420
+    ],
+    "max_references_per_clip": 4,
+    "object_reference_roles": [
+      "character",
+      "hero_prop",
+      "dynamic_entity",
+      "interactive_prop"
+    ],
+    "background_entity_separation": true,
+    "identity_lock": true,
+    "character_identity_registry": "character_identity_registry.json",
+    "ltx_prompt_guide_applied": true
+  },
+  "scene_count": 5,
+  "clip_count": 24,
+  "total_requested_seconds": 412,
+  "scene_requested_seconds": {
+    "SC01-001": 90,
+    "SC01-002": 48,
+    "SC01-003": 130,
+    "SC01-004": 74,
+    "SC01-005": 70
+  },
+  "reference_counts": {
+    "character": 41,
+    "hero_prop": 4,
+    "dynamic_entity": 2
+  },
+  "status_summary": {
+    "awaiting_background": 23,
+    "needs_confirmation": 1
+  },
+  "new_backgrounds_required": [
+    "BG_EP01_DEEP_SEA_PURSUIT_CORRIDOR_EMPTY",
+    "BG_EP01_NIGHT_SEA_EMPTY_FROM_WINDOW"
+  ],
+  "notes": [
+    "V4 supersedes V3 — RaisingaDragonSeason01_EP01_v3 preserved untouched.",
+    "Character Identity Registry locks Lua, Village Child 1/2, Old Fisherman, Young Mir traits.",
+    "All clips awaiting_background except SC01-004_02 needs_confirmation (shell interactive_prop).",
+    "Black Tide and Black Jellyfish separated from background plates.",
+    "Lua fishing spear added as hero_prop Reference in SC01-002_01, _02 and SC01-003_01, _02.",
+    "SC01-003 expanded to 9 clips with contact/vision separation A-F.",
+    "Lua+Young Mir clips include anatomy separation block and character_review checklist.",
+    "Multi-character clips include identity_review checklist and Identity Lock in global_prompt."
+  ]
+}

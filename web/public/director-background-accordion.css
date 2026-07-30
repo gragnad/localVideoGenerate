@@ -1,0 +1,112 @@
+#directorPromptClips {
+  display: block;
+  width: 100%;
+  grid-template-columns: none;
+}
+
+.director-background-accordion {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0d131d;
+}
+
+.director-background-row {
+  background: transparent;
+}
+
+.director-background-row + .director-background-row {
+  border-top: 1px solid var(--line);
+}
+
+.director-background-row > summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 58px;
+  gap: 16px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.director-background-row > summary::-webkit-details-marker {
+  display: none;
+}
+
+.director-background-row > summary:hover {
+  background: #151e2b;
+}
+
+.director-background-row[open] > summary {
+  background: #101722;
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.director-background-row-title {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  text-align: left;
+}
+
+.director-background-row-title b,
+.director-background-row-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.director-background-row-title small,
+.director-background-row-meta small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.director-background-row-meta {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.director-background-row-meta em {
+  color: var(--accent2);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.director-background-row-meta i {
+  width: 8px;
+  height: 8px;
+  border-right: 1px solid var(--muted);
+  border-bottom: 1px solid var(--muted);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .16s ease;
+}
+
+.director-background-row[open] .director-background-row-meta i {
+  transform: rotate(225deg) translate(-1px, -1px);
+}
+
+.director-background-row > .director-background-body {
+  padding: 14px;
+  border-top: 1px solid var(--line);
+  background: #0a1018;
+}
+
+.director-prompt-clip.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, #0d131d);
+}
+
+@media (max-width: 700px) {
+  .director-background-row > summary {
+    align-items: start;
+  }
+
+  .director-background-row-meta em {
+    display: none;
+  }
+}

@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "project_id": "RaisingaDragonSeason01_EP01_v4",
+  "characters": {
+    "CHAR_LUA": {
+      "character_id": "CHAR_LUA",
+      "display_name": "Lua",
+      "species": "human",
+      "age_group": "young child",
+      "gender_presentation": "girl",
+      "body_type": "small youthful child build",
+      "skin_or_surface": "sun-browned human skin",
+      "eye_color": "amber-brown",
+      "hair_color": "medium-brown",
+      "hairstyle": "messy high loose bun with long untidy face-framing strands",
+      "clothing": "rough sleeveless beige tunic with frayed edges, matching beige shorts",
+      "footwear": "simple brown leather sandals",
+      "accessories": "central white shell pendant, thick rope belt with small shell ornaments",
+      "unique_identity_anchors": [
+        "high loose brown bun",
+        "white shell pendant at chest center",
+        "blue marking on left wrist and hand",
+        "beige sleeveless frayed tunic"
+      ],
+      "exclusive_traits": [
+        "no shoulder basket",
+        "no dark gray boy's tunic",
+        "no indigo-blue dress",
+        "no beard",
+        "no dragon anatomy"
+      ],
+      "must_not_inherit": [
+        "Village Child 1 short hair",
+        "Village Child 2 ponytail and basket",
+        "Old Fisherman gray hair and beard",
+        "Young Mir wings horns scales tail"
+      ],
+      "source_path": "RaisingaDragonSeason01/Lua.png"
+    },
+    "CHAR_VILLAGE_CHILD_1": {
+      "character_id": "CHAR_VILLAGE_CHILD_1",
+      "display_name": "Village Child 1",
+      "species": "human",
+      "age_group": "young child",
+      "gender_presentation": "boy",
+      "body_type": "small lean child build",
+      "skin_or_surface": "sun-browned human skin",
+      "eye_color": "dark-brown",
+      "hair_color": "black-brown",
+      "hairstyle": "short tousled hair around ears and neck, never tied up",
+      "clothing": "dark charcoal-gray sleeveless V-neck tunic with frayed edges, dark brown shorts",
+      "footwear": "simple brown sandals",
+      "accessories": "thin rope belt, small shell and bead objects at one hip",
+      "unique_identity_anchors": [
+        "short tousled black-brown hair",
+        "dark charcoal sleeveless V-neck tunic",
+        "playful mischievous expression"
+      ],
+      "exclusive_traits": [
+        "no central white shell pendant",
+        "no blue wrist marking",
+        "no shoulder basket",
+        "no high bun or ponytail"
+      ],
+      "must_not_inherit": [
+        "Lua's high brown bun",
+        "Lua's blue wrist marking",
+        "Lua's white shell pendant",
+        "Village Child 2 ponytail and basket"
+      ],
+      "source_path": "RaisingaDragonSeason01/villageChild01.png"
+    },
+    "CHAR_VILLAGE_CHILD_2": {
+      "character_id": "CHAR_VILLAGE_CHILD_2",
+      "display_name": "Village Child 2",
+      "species": "human",
+      "age_group": "young child",
+      "gender_presentation": "girl",
+      "body_type": "small slender child build",
+      "skin_or_surface": "sun-browned human skin",
+      "eye_color": "dark-brown",
+      "hair_color": "black-brown",
+      "hairstyle": "high ponytail with ochre-colored tie, loose curved cheek strands",
+      "clothing": "faded indigo-blue short-sleeved tunic with pale cream frilled hem, beige shorts",
+      "footwear": "simple brown sandals",
+      "accessories": "woven shoulder basket at right hip, small layered necklaces, rope belt",
+      "unique_identity_anchors": [
+        "high black-brown ponytail with ochre tie",
+        "indigo-blue short-sleeved tunic with cream frill",
+        "woven shoulder basket at right hip"
+      ],
+      "exclusive_traits": [
+        "no blue wrist marking",
+        "no central white shell pendant",
+        "no dark gray sleeveless boy's tunic",
+        "no dragon anatomy"
+      ],
+      "must_not_inherit": [
+        "Lua's brown bun and shell pendant",
+        "Lua's blue wrist marking",
+        "Village Child 1 short hair and gray tunic",
+        "Young Mir wings horns scales tail"
+      ],
+      "source_path": "RaisingaDragonSeason01/village_child_2.png"
+    },
+    "CHAR_OLD_FISHERMAN": {
+      "character_id": "CHAR_OLD_FISHERMAN",
+      "display_name": "Old Fisherman",
+      "species": "human",
+      "age_group": "elderly adult",
+      "gender_presentation": "man",
+      "body_type": "tall lean adult build",
+      "skin_or_surface": "deeply weathered sun-browned skin",
+      "eye_color": "stern dark",
+      "hair_color": "gray",
+      "hairstyle": "shoulder-length wavy gray hair with full gray beard and mustache",
+      "clothing": "off-white long-sleeved shirt rolled at sleeves, dark navy sleeveless fishing vest, dark rolled trousers",
+      "footwear": "old brown sandals",
+      "accessories": "thick rope belt",
+      "unique_identity_anchors": [
+        "full gray beard and mustache",
+        "shoulder-length wavy gray hair",
+        "dark navy sleeveless vest over off-white shirt",
+        "tall adult proportions"
+      ],
+      "exclusive_traits": [
+        "no child body proportions",
+        "no young smooth face",
+        "no high bun or ponytail",
+        "no dragon anatomy"
+      ],
+      "must_not_inherit": [
+        "Lua's high brown bun",
+        "Lua's shell pendant",
+        "Lua's blue wrist marking",
+        "Lua's child face"
+      ],
+      "source_path": "RaisingaDragonSeason01/old_fisherman.png"
+    },
+    "CHAR_YOUNG_MIR": {
+      "character_id": "CHAR_YOUNG_MIR",
+      "display_name": "Young Mir",
+      "species": "small sea dragon",
+      "age_group": "young hatchling",
+      "gender_presentation": "neutral dragon",
+      "body_type": "small quadruped dragon with wings and tail",
+      "skin_or_surface": "silver-blue scales",
+      "eye_color": "clear blue",
+      "hair_color": null,
+      "hairstyle": "short curved horns, fin-like wings, no human hair",
+      "clothing": "unclothed dragon body",
+      "footwear": "four small dragon limbs",
+      "accessories": "water-drop tail crystal, faint crown-shaped chest wave mark",
+      "unique_identity_anchors": [
+        "fin-like dragon wings",
+        "scaled tail with water-drop crystal",
+        "crown-shaped wave mark on chest"
+      ],
+      "exclusive_traits": [
+        "no human face or hair",
+        "no human clothing",
+        "no sandals or rope belt"
+      ],
+      "must_not_inherit": [
+        "Lua human anatomy and clothing",
+        "any human child hairstyle or accessories"
+      ],
+      "source_path": "RaisingaDragonSeason01/YoungMir.png"
+    }
+  }
+}
