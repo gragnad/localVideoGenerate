@@ -22,6 +22,7 @@ SLOT_ROLES = {
 CHARACTER_SLOTS = {1, 2}
 PROP_SLOTS = {3, 4}
 CONTINUITY_MODES = {"new_anchor", "continuity_frame"}
+REFERENCE_MODES = {"subject_references", "anchor_as_reference"}
 
 
 class MSRSequenceValidationError(ValueError):
@@ -64,16 +65,24 @@ def normalize_references(rows: list[dict[str, Any]] | None) -> list[dict[str, An
     return normalized
 
 
-def compile_global_prompt(world_prompt: str, references: list[dict[str, Any]]) -> str:
+def compile_global_prompt(
+    world_prompt: str,
+    references: list[dict[str, Any]],
+    reference_mode: str = "subject_references",
+) -> str:
     world = _text(world_prompt)
     if not world:
         raise MSRSequenceValidationError("MSR 세계관·영상 스타일 설명이 필요합니다.")
     lines = [world]
     for row in references:
         slot = int(row["slot"])
-        label = "Character" if slot in CHARACTER_SLOTS else "Prop"
+        label = (
+            "Scene Anchor"
+            if reference_mode == "anchor_as_reference" and slot == 1
+            else ("Character" if slot in CHARACTER_SLOTS else "Prop")
+        )
         lines.append(f"Picture {slot} — {label}: {row['description']}")
-    if any(int(row["slot"]) == 2 for row in references):
+    if reference_mode != "anchor_as_reference" and any(int(row["slot"]) == 2 for row in references):
         lines.append("Keep Picture 1 and Picture 2 visually distinct; never merge their identity, anatomy or costume.")
     if any(int(row["slot"]) in PROP_SLOTS for row in references):
         lines.append("Pictures 3 and 4 are objects only; keep their owner, shape and material consistent and never turn them into characters.")
@@ -87,7 +96,14 @@ def validate_submission(data: dict[str, Any]) -> dict[str, Any]:
         raise MSRSequenceValidationError(
             "새 MSR 프롬프트 전략(msr_continuity_v1)이 필요합니다. 기존 Director/MSR 프롬프트는 불러올 수 없습니다."
         )
-    references = normalize_references(list(data.get("references") or []))
+    reference_mode = _text(data.get("reference_mode")) or "subject_references"
+    if reference_mode not in REFERENCE_MODES:
+        raise MSRSequenceValidationError(f"지원하지 않는 참조 모드입니다: {reference_mode}")
+    source_references = list(data.get("references") or [])
+    references = normalize_references(source_references)
+    if reference_mode == "anchor_as_reference":
+        if len(references) != 1 or int(references[0]["slot"]) != 1:
+            raise MSRSequenceValidationError("앵커 참조 모드는 동일한 앵커 이미지를 참조 슬롯 1에만 사용해야 합니다.")
     anchor = dict(data.get("anchor") or data.get("background") or {})
     if not anchor.get("upload_path") and not anchor.get("source_path"):
         raise MSRSequenceValidationError("통합 앵커 이미지를 선택하세요.")
@@ -132,11 +148,16 @@ def validate_submission(data: dict[str, Any]) -> dict[str, Any]:
         "maximum_duration_seconds": MAX_SECONDS,
         "requested_seconds": round(total, 4),
         "world_prompt": world_prompt,
-        "global_prompt": compile_global_prompt(world_prompt, references),
+        "global_prompt": compile_global_prompt(world_prompt, references, reference_mode),
+        "reference_mode": reference_mode,
         "references": references,
         "anchor": anchor,
         "background": anchor,
         "relay_segments": relay,
         "continuity_mode": continuity_mode,
         "source_scene_refs": _text(data.get("source_scene_refs")),
+        "review_intent_ko": (
+            _text(data.get("review_intent_ko"))
+            or _text(data.get("source_scene_refs"))
+        ),
     }

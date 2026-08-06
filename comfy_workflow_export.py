@@ -55,6 +55,17 @@ WIDGET_SCHEMAS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+FRONTEND_WIDGET_STATE_NODES = {"PreviewAny"}
+
+
+def _graph_widget_schema(source: dict[str, Any]) -> tuple[str, ...]:
+    """Read widget order embedded by current ComfyUI graph JSON."""
+    return tuple(
+        str(item["name"])
+        for item in source.get("inputs") or []
+        if isinstance(item.get("widget"), dict) and item.get("name")
+    )
+
 
 def _resize_widgets(values: list[Any]) -> dict[str, Any]:
     if not values:
@@ -133,7 +144,7 @@ def graph_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
     for source in nodes:
         if (
             int(source.get("mode", 0)) != 0
-            or source.get("type") in {"Note", "Reroute"}
+            or source.get("type") in {"Note", "MarkdownNote", "Reroute"}
         ):
             continue
         node_id = str(source["id"])
@@ -142,10 +153,10 @@ def graph_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
         if class_type == "ResizeImageMaskNode":
             inputs = _resize_widgets(widget_values)
         else:
-            schema = WIDGET_SCHEMAS.get(class_type, ())
-            if widget_values and not schema:
+            schema = WIDGET_SCHEMAS.get(class_type) or _graph_widget_schema(source)
+            if widget_values and not schema and class_type not in FRONTEND_WIDGET_STATE_NODES:
                 raise ValueError(f"widget 스키마가 정의되지 않은 노드입니다: {class_type} ({node_id})")
-            inputs = dict(zip(schema, widget_values, strict=False))
+            inputs = dict(zip(schema or (), widget_values, strict=False))
 
         for input_spec in source.get("inputs") or []:
             link_id = input_spec.get("link")

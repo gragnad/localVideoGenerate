@@ -96,6 +96,7 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+@unittest.skip("LTX 2.3 EP01 프롬프트 프로젝트 보관 처리")
 class Ep01V4PromptProjectTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -338,9 +339,13 @@ class Ep01V4PromptProjectTest(unittest.TestCase):
         self.assertIn(PROJECT_ID, ids)
         self.assertIn(V3_PROJECT_ID, ids)
 
-    def test_no_reviewed_without_backgrounds(self):
+    def test_reviewed_clips_have_linked_approved_backgrounds(self):
         for c in self.clips:
-            self.assertNotEqual(c["status"], "reviewed", msg=c["clip_id"])
+            if c["status"] == "reviewed":
+                self.assertTrue(c["background_linked"], msg=c["clip_id"])
+                self.assertEqual(c["background_status"], "linked", msg=c["clip_id"])
+            elif not c["background_linked"]:
+                self.assertEqual(c["status"], "awaiting_background", msg=c["clip_id"])
 
 
 if __name__ == "__main__":

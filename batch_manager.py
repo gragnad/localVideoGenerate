@@ -124,6 +124,7 @@ def _new_batch_payload(
         "job_ids": [],
         "generation_job_ids": [],
         "candidate_job_ids": [],
+        "benchmark_job_ids": [],
         "upscale_job_ids": [],
         "check_job_ids": [],
         "modify_job_ids": [],
@@ -211,7 +212,7 @@ def attach_job_to_batch(
         if not batch:
             raise FileNotFoundError(f"배치 기록을 찾을 수 없습니다: {batch_id}")
 
-        if job_type in {"generate", "candidate", "upscale"}:
+        if job_type in {"generate", "candidate", "upscale", "benchmark"}:
             if batch.get("status") != "open" or bool(batch.get("registration_closed")):
                 raise RuntimeError(f"생성 등록이 종료된 배치입니다: {batch_id}")
 
@@ -223,6 +224,7 @@ def attach_job_to_batch(
         key = {
             "generate": "generation_job_ids",
             "candidate": "candidate_job_ids",
+            "benchmark": "benchmark_job_ids",
             "upscale": "upscale_job_ids",
             "assemble": "assemble_job_ids",
             "check": "check_job_ids",
@@ -234,13 +236,13 @@ def attach_job_to_batch(
                 typed_ids.append(job_id)
             batch[key] = typed_ids
 
-        if job_type in {"candidate", "upscale", "assemble"}:
+        if job_type in {"candidate", "upscale", "assemble", "benchmark"}:
             generation_ids = list(batch.get("generation_job_ids") or [])
             if job_id not in generation_ids:
                 generation_ids.append(job_id)
             batch["generation_job_ids"] = generation_ids
 
-        if job_type in {"generate", "candidate", "upscale", "assemble"}:
+        if job_type in {"generate", "candidate", "upscale", "assemble", "benchmark"}:
             # 유예 시간 중 새 생성 작업이 등록되면 동일 배치에 포함합니다.
             batch["idle_since_epoch"] = None
             batch["stage"] = "collecting_generation_jobs"
@@ -358,6 +360,45 @@ def mark_batch_generation_complete(
     review_job_ids = [
         job_id for job_id in generation_job_ids if job_id not in candidate_job_ids
     ]
+
+    if str(batch.get("batch_mode") or "") == "model_benchmark":
+        statuses = job_statuses_for_batch(engine_root / "jobs", batch)
+        benchmark_ids = list(batch.get("benchmark_job_ids") or [])
+        completed_ids = [
+            job_id for job_id in benchmark_ids if statuses.get(job_id) == "completed"
+        ]
+        completed_count = len(completed_ids)
+        failed_count = len(benchmark_ids) - completed_count
+        if completed_ids:
+            status = "ready_for_review_preparation"
+            stage = "benchmark_generation_complete"
+            next_stage = "video_review"
+            message = (
+                f"모델 벤치마크 생성 완료 · 성공 {completed_count}건 · 실패 {failed_count}건 · "
+                "Qwen 자동 검수를 준비합니다."
+            )
+        else:
+            status = "benchmark_generation_failed"
+            stage = "benchmark_generation_failed"
+            next_stage = "stopped"
+            message = "완료된 벤치마크 영상이 없어 Qwen 자동 검수를 시작할 수 없습니다."
+        completed_at = now_iso()
+        updated = update_batch(
+            engine_root,
+            str(batch["batch_id"]),
+            status=status,
+            stage=stage,
+            next_stage=next_stage,
+            generation_completed_at=completed_at,
+            sealed_at=completed_at,
+            idle_since_epoch=None,
+            review_job_ids=completed_ids,
+            benchmark_completed_count=completed_count,
+            benchmark_failed_count=failed_count,
+            message=message,
+        )
+        clear_open_batch_pointer(engine_root, str(batch["batch_id"]))
+        return updated
 
     if candidate_job_ids and not review_job_ids:
         candidate_statuses = job_statuses_for_batch(engine_root / "jobs", batch)

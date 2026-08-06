@@ -30,9 +30,9 @@ NEGATIVE = (
 
 CHARACTERS = {
     "lua": ("Lua.png", "Lua, a small human coastal girl with sun-browned skin, messy light-brown hair, large brown eyes, a short worn sleeveless beige tunic, rope belt and shell ornaments; human anatomy only."),
-    "mir": ("YoungMir.png", "Young Mir, a small blue-silver sea dragon with short dark horns, fin-like wings, bright blue eyes, a teardrop crystal at the tail tip and a faint crown-wave chest mark; dragon anatomy only."),
-    "child1": ("villageChild01.png", "Village Child 1, the coastal village boy shown in the reference sheet; preserve his exact face, hair, clothing, age and human anatomy, clearly distinct from Lua."),
-    "child2": ("village_child_2.png", "Village Child 2, the coastal village girl shown in the reference sheet with her woven shoulder basket; preserve her exact face, hair, clothing, age and human anatomy, clearly distinct from Lua."),
+    "mir": ("YoungMir.png", "Young Mir is a DRAGON hatchling, never a human baby or child: a small blue-silver sea dragon with short dark horns, fin-like wings, bright blue eyes, a teardrop crystal at the tail tip and a faint crown-wave chest mark. His nose-to-tail-base body length is approximately Lua's torso length and he fits completely inside the shallow water bowl; preserve dragon anatomy and this scale."),
+    "child1": ("villageChild01.png", "Village Child 1, the coastal village boy shown in the reference sheet; preserve his exact face, short hair, clothing, age and human anatomy, visually distinct from every other village child."),
+    "child2": ("village_child_2.png", "Village Child 2, the coastal village girl shown in the reference sheet with tied hair and her woven shoulder basket; preserve her exact face, hair, clothing, age and human anatomy, visually distinct from every other village child."),
     "fisherman": ("old_fisherman.png", "The Old Fisherman shown in the reference sheet, an elderly coastal man with weathered features and practical fishing clothes; preserve his exact face, hair, age, clothing and calm grounded posture."),
     "black_tide": ("BLACK TIDE — SUPERNATURAL .png", "The Black Tide, a living supernatural mass of black seawater and smoke-like shadow that briefly forms hand-, mouth- and face-like silhouettes; never give it a stable human body."),
     "jellyfish": ("BLACK JELLYFISH .png", "The Black Jellyfish, a large translucent black deep-sea creature filled with ink-like smoke and long trailing tentacles; preserve its non-human jellyfish anatomy."),
@@ -89,34 +89,53 @@ CLIPS: list[dict[str, Any]] = [
         "relay": [beat(6, "Young Mir breaks through the storm surface inside a wave, barely conscious as the blue light dims."), beat(6, "The current carries the small blue-silver body toward the dark coast until the glow disappears behind the shore rocks.")],
     },
     {
-        "scene_id": "SC01-002", "clip_id": "SC01-002_M01", "title": "바다에게 거절당한 루아", "seconds": 20,
-        "source": "EP01 S#2 — 폭풍 다음 날, 루아 단독 등장부터 물고기 실패 후 일어나기까지", "mode": "new_anchor", "refs": [ref(1, "lua"), ref(3, "spear", prop=True)],
-        "anchor": "A post-storm coastal village morning on a wet stone breakwater. Lua has room to enter, stalk a small fish shadow below the edge, thrust her fishing spear, fall into shallow water and stand again. Damaged nets, broken wood and small boats establish the storm aftermath. No village children or adults are visible.",
-        "relay": [beat(5, "The wet breakwater and storm-damaged village are briefly established before Lua enters alone carrying her fishing spear."), beat(5, "Lua spots a small fish shadow below the breakwater, plants her feet and raises the spear with awkward overconfidence."), beat(5, "Lua thrusts too early. The fish escapes and water splashes across her face as her balance fails."), beat(5, "Lua slips into the shallow water, then pushes herself upright with wet hair across her face, embarrassed but trying to look composed. End after she is standing again.")],
+        "scene_id": "SC01-002", "clip_id": "SC01-002_M01", "title": "한 번의 찌르기와 빗나감", "seconds": 5,
+        "source": "EP01 S#2 — 루아가 물고기를 겨누고 작살을 한 번 찌르지만 놓침", "mode": "new_anchor", "anchor_id": "ANC_SC01-002_M01_V3", "refs": [ref(1, "lua"), ref(3, "spear", prop=True)],
+        "review_ko": "젖은 방파제 가장자리에서 루아가 낮은 준비 자세로 물고기를 겨눈다. 작살 끝은 수면 바로 위에 있고 두 손과 팔꿈치는 어깨보다 아래에 있다. 머리·몸통·꼬리가 명확한 작은 물고기는 작살 진행축에서 옆으로 떨어져 있으며 둘 사이에는 깨끗한 물 공간이 보인다. 루아가 낮은 자세에서 짧고 직접적인 찌르기를 정확히 한 번 수행하면 물고기가 옆으로 피하고 작살 끝이 물에 들어가 작은 물보라가 생긴다. 카메라는 작살선을 따라 짧게 접근한 뒤 물보라와 앞으로 쏠리는 루아를 아래로 따라간다. 대사는 없다.",
+        "anchor": "A dynamic low three-quarter side composition on a post-storm wet stone breakwater. Lua is fully visible at the shallow edge in a compact low aiming stance, with both elbows and both hands below shoulder level. Her fixed spear forms a strong diagonal from her low hands to a dark stone point hovering just above the water below her waist. A single small natural fish is clearly readable underwater with a distinct head, body and tail, swimming laterally several body lengths to the side of the spear point. A broad clean gap of open water visibly separates the fish from the spear. Lua's front sandal rests at the slick boundary, and her feet, spear point, fish and water contact area remain readable in the same frame. Damaged nets and small boats stay secondary in the distant background.",
+        "relay": [beat(5, "Begin in the supplied dynamic low three-quarter side composition with Lua, both feet, the complete spear, the separate fish and the shallow water visible together. During one brief aiming beat, the camera makes one subtle forward push along the existing diagonal spear line. The spear point stays low near the surface as Lua makes exactly one short forward-and-down stabbing thrust from her low hands. The fish immediately darts farther sideways across the clear water gap; the spear point enters the vacated water and makes one small splash. The camera gives one short restrained downward follow toward that splash as the missed thrust pulls Lua's shoulders slightly beyond her front foot. End on the first loss of balance. The moment plays silently.")],
     },
     {
-        "scene_id": "SC01-002", "clip_id": "SC01-002_M02", "title": "첫 번째 놀림", "seconds": 12,
-        "source": "EP01 S#2 — 마을아이 1이 새로 등장해 루아를 놀림", "mode": "new_anchor", "refs": [ref(1, "lua"), ref(2, "child1"), ref(3, "spear", prop=True)],
-        "anchor": "The same wet breakwater after Lua has climbed from the shallows. Lua stands wet with her spear while Village Child 1 has newly entered at a separate distance behind her. Their silhouettes and identities are clearly separated; no second village child is present.",
-        "relay": [beat(6, "Village Child 1 enters, points toward the empty water and laughs while Lua turns toward him, still wet and gripping her spear."), beat(6, "Village Child 1 says naturally in Korean, \"또 놓쳤다!\" Lua absorbs the embarrassment and prepares to defend herself without moving closer to him.")],
+        "scene_id": "SC01-002", "clip_id": "SC01-002_M01B", "title": "젖은 가장자리의 낙상", "seconds": 5,
+        "source": "EP01 S#2 — 빗나간 찌르기의 힘으로 루아가 미끄러져 얕은 물에 빠짐", "mode": "new_anchor", "refs": [ref(1, "lua"), ref(3, "spear", prop=True)],
+        "review_ko": "루아는 이미 작살을 찌른 직후 상체와 어깨가 앞발보다 앞으로 나간 불안정한 자세로 시작한다. 작살 끝은 얕은 물에 있고 앞 샌들은 젖은 돌 가장자리에 반쯤 걸쳐 있다. 앞으로 전달되는 체중 때문에 앞발이 한 번 미끄러지고 놀란 숨이 짧게 새어 나온다. 카메라는 중간 측면 구도에서 루아의 상체로 빠르게 접근한 뒤, 짧은 시네마틱 슬로모션으로 앞으로 무너지는 몸을 가까운 측면에서 아래로 추적한다. 무릎과 엉덩이가 얕은 물에 닿는 순간에는 정상 속도의 무게감 있는 물보라가 발생한다. 같은 작살은 처음부터 끝까지 루아의 두 손과 함께 움직인다.",
+        "anchor": "A post-storm coastal village morning on the same wet stone breakwater. Lua is frozen immediately after a missed low spear thrust in a full-body side view: her shoulders and chest are already beyond her front foot, the spear tip is already in the shallow water, her front sandal is half over the slick stone edge and her rear leg is stretched behind her. This is a visibly unstable forward-falling pose, with open shallow water directly below her and no other person visible.",
+        "relay": [beat(5, "Begin from the supplied off-balance pose with the spear point already resting in the shallow water and both of Lua's hands physically supporting the same shaft. Her existing forward momentum flows through her shoulders and hips. The front sandal releases from the slick stone lip, surprise flashes across her face and a brief startled breath escapes. The camera performs one energetic continuous move: a fast push from the medium side view toward Lua's upper body as her foot slips, followed by a close downward side-tracking sweep with her falling body. A brief cinematic slow-motion emphasis reveals her shifting weight and startled expression during the descent. Her knees and hip then meet the shallow water at full impact speed with one weighty compact splash, while the spear travels with her hands throughout the fall.")],
     },
     {
-        "scene_id": "SC01-002", "clip_id": "SC01-002_M03", "title": "두 번째 놀림과 루아의 허세", "seconds": 18,
-        "source": "EP01 S#2 — 마을아이 2 등장, 루아의 반박과 수심 확인 변명", "mode": "new_anchor", "refs": [ref(1, "lua"), ref(2, "child2"), ref(3, "spear", prop=True)],
-        "anchor": "A fresh conversational angle on the wet breakwater. Lua stands damp and defensive with her fishing spear; Village Child 2 faces her with a woven shoulder basket at her own hip. Keep both girls visually distinct and exclude Village Child 1 from the frame.",
-        "relay": [beat(6, "Village Child 2 looks at wet Lua and says naturally in Korean, \"루아 누나는 바다랑 안 맞아!\""), beat(6, "Lua snaps back naturally in Korean, \"안 맞긴 뭐가 안 맞아!\" She tries to recover her pride while keeping the spear under control."), beat(6, "Lua pushes wet hair from her face and claims naturally in Korean, \"방금 건 일부러 빠진 거야.\" After a short pause she adds, \"수심 확인.\"")],
+        "scene_id": "SC01-002", "clip_id": "SC01-002_M01C", "title": "물에서 일어나는 루아", "seconds": 5,
+        "source": "EP01 S#2 — 얕은 물에 빠진 루아가 태연한 척 다시 일어남", "mode": "continuity_frame", "from": "SC01-002_M01B", "refs": [ref(1, "lua"), ref(3, "spear", prop=True)],
+        "review_ko": "직전 낙상 뒤 루아가 얕은 물에 무릎과 엉덩이를 담근 상태에서 시작한다. 루아는 같은 작살을 놓지 않고 한 손으로 가까운 돌을 짚은 뒤 한쪽 무릎을 세워 몸을 일으킨다. 젖은 머리카락이 얼굴에 붙고 당황했지만 아무 일도 아니라는 표정을 지으려 한다. 새로운 찌르기나 두 번째 낙상은 없다. 대사는 없다.",
+        "anchor": "Use the selected stable end frame from SC01-002_M01B after the completed fall. Lua is seated or kneeling in the shallow water beside the same wet stone edge, visibly soaked, still owning the same spear, with one nearby solid stone available for her supporting hand. Preserve the same morning light, side orientation and breakwater geography.",
+        "relay": [beat(5, "Continue directly after the completed fall with Lua already settled in the shallow water. She keeps ownership of the same spear, places one free hand firmly on the nearby stone, draws one knee underneath her and pushes herself back to stable footing in one continuous recovery. Wet hair hangs across her face; after standing, she lowers the spear and forces an embarrassed expression of dignity. The camera makes only a small upward correction to keep her body framed. No dialogue.")],
+    },
+    {
+        "scene_id": "SC01-002", "clip_id": "SC01-002_M02", "title": "두 아이의 놀림", "seconds": 12,
+        "source": "EP01 S#2 — 마을아이 1과 2가 함께 등장해 화면 밖 루아를 놀림", "mode": "new_anchor", "refs": [ref(1, "child1"), ref(2, "child2")],
+        "review_ko": "아침의 젖은 방파제에서 마을아이 1은 화면 왼쪽, 마을아이 2는 화면 오른쪽에 서고 주변 공간은 비어 있다. 마을아이 1이 물을 가리키며 한 번 웃고 한국어로 \"또 놓쳤다!\"라고 말한다. 마을아이 1이 입을 닫은 뒤 마을아이 2가 한국어로 \"루아 누나는 바다랑 안 맞아!\"라고 말한다. 두 아이는 처음부터 끝까지 같은 위치와 외형을 유지하며, 카메라는 두 사람을 향해 천천히 다가간다.",
+        "anchor": "A post-storm wet village breakwater in morning light. Exactly two village children occupy a clean medium two-shot: Village Child 1 stands frame-left with short hair and empty hands; Village Child 2 stands frame-right with tied hair and her woven shoulder basket attached only to her own hip. Both bodies angle toward the empty frame-right edge. Open wet stone and sea fill that sightline, while the foreground and background remain empty.",
+        "relay": [beat(6, "Begin from the supplied anchor and keep exactly the same two children in a stable medium two-shot. Village Child 1 remains frame-left with empty hands; Village Child 2 remains frame-right with her own woven shoulder basket. Both look toward the empty frame-right edge. Village Child 1 points toward the water, gives one contained laugh and says exactly once in natural Korean, \"또 놓쳤다!\" Only Village Child 1 speaks and moves his mouth; Village Child 2 listens with closed lips. The camera makes one restrained slow push-in without changing their positions or the empty surrounding space."), beat(6, "Continue the same take and preserve the same two distinct faces, hair, clothes and basket ownership. Village Child 1 closes his mouth and lowers his hand. Village Child 2 leans forward slightly, keeps her eyes toward the empty frame-right edge and says exactly once in natural Korean, \"루아 누나는 바다랑 안 맞아!\" Only Village Child 2 speaks and moves her mouth; Village Child 1 stays silent. The two children share one brief laugh as the camera settles, and the composition remains a clean two-shot from beginning to end. No repeated line, Chinese speech, invented words or other voice.")],
+    },
+    {
+        "scene_id": "SC01-002", "clip_id": "SC01-002_M03", "title": "루아의 허세", "seconds": 18,
+        "source": "EP01 S#2 — 루아 단독 역방향 컷, 두 아이에게 반박하고 수심 확인이라고 변명", "mode": "new_anchor", "refs": [ref(1, "lua"), ref(3, "spear", prop=True)],
+        "review_ko": "젖은 루아가 방파제에 혼자 서서 작살을 낮게 들고 화면 왼쪽의 빈 공간을 바라본다. 루아가 한국어로 \"안 맞긴 뭐가 안 맞아!\"라고 말하고, 카메라는 허리 위 중간 구도에서 가슴 위 중간 클로즈업까지 눈에 보이게 천천히 가까워진다. 루아는 손을 머리 쪽으로 올리지 않고 작살을 안정적으로 낮게 유지한 채 어깨를 펴고 턱을 들며 \"방금 건 일부러 빠진 거야.\"라고 말한다. 잠깐 침묵한 뒤 얕은 물을 보았다가 다시 왼쪽을 바라보며 \"수심 확인.\"이라고 말한다. 전체 영상에는 루아 한 명만 등장한다.",
+        "anchor": "A post-storm wet breakwater in the same morning light and horizon height. Wet Lua stands alone in a clean medium composition, holding her fixed fishing spear low and angling her body toward frame-left. Empty wet stone and open sea fill the entire frame-left sightline and background.",
+        "relay": [beat(6, "Begin from the supplied anchor in a stable waist-up medium shot of wet Lua alone, her eyes directed toward the empty frame-left edge. Lua keeps the rigid spear safely low, lifts only her chin and says exactly once in natural Korean, \"안 맞긴 뭐가 안 맞아!\" Only Lua speaks and moves her mouth. The camera begins one clearly visible but gentle continuous push from waist-up framing toward chest-up framing while the wet stone and sea remain empty around her."), beat(6, "Continue the same unbroken solo shot and the same gentle push-in. Both of Lua's hands remain below chest level and never approach her hair or face; the hand holding the spear keeps it physically supported and motionless at her side. Lua straightens her shoulders, raises her chin a little farther, forces a proud half-smile and says exactly once in natural Korean, \"방금 건 일부러 빠진 거야.\" The same fixed wooden spear with dark stone tip stays low and solid throughout. The surrounding breakwater remains empty and quiet."), beat(6, "Let the camera complete its move and settle into a chest-up medium-close solo shot after one clear silent beat. Lua glances briefly toward the shallow water using only her eyes, returns her gaze to the empty frame-left edge and adds dryly in natural Korean, \"수심 확인.\" Only Lua speaks. Hold on her deadpan attempt to preserve dignity, with closed lips after the final line. Her hands and spear remain low and physically supported, and the composition remains one character against empty wet stone and sea, with no extra dialogue, repeated line, Chinese speech or invented voice.")],
     },
     {
         "scene_id": "SC01-002", "clip_id": "SC01-002_M04", "title": "늙은 어부의 경고", "seconds": 15,
         "source": "EP01 S#2 — SC01-002_02 씬 3·4·5, 루아와 늙은 어부", "mode": "new_anchor", "refs": [ref(1, "lua"), ref(2, "fisherman"), ref(3, "spear", prop=True)],
+        "review_ko": "젖은 방파제에서 루아와 늙은 어부가 같은 축의 중간 전신 구도에 함께 선다. 늙은 어부가 다가와 \"루아야.\"라고 부르고 루아가 \"네!\"라고 답한다. 어부가 \"바다는 고집으로 되는 게 아니다.\"라고 말하면 루아는 말없이 상처받은 반응을 보인다. 어부가 먼 동굴을 바라보며 \"오늘은 동굴 쪽 가지 마라. 폭풍 뒤에는 뭐가 밀려올지 몰라.\"라고 경고하고, 카메라는 그의 시선을 따라 천천히 동굴을 보여준다.",
         "anchor": "A grounded two-person composition on the wet coastal breakwater. Lua stands with her fishing spear while the Old Fisherman has approached and calmly faces her. The cliff cave is visible far along their shared sightline. No village children are visible.",
-        "relay": [beat(5, "The Old Fisherman approaches with slow stable steps and says naturally in Korean, \"루아야.\" Lua immediately straightens and answers, \"네!\""), beat(5, "The Old Fisherman tells her naturally in Korean, \"바다는 고집으로 되는 게 아니다.\" Lua's expression hardens but she stays quiet."), beat(5, "The Old Fisherman looks toward the cliff cave and warns naturally in Korean, \"오늘은 동굴 쪽 가지 마라. 폭풍 뒤에는 뭐가 밀려올지 몰라.\" Lua follows his gaze without answering.")],
+        "relay": [beat(5, "Start in a stable medium-wide two-shot that keeps both Lua and the Old Fisherman visible on the same wet breakwater axis. The fisherman takes his final two slow steps, stops beside Lua without blocking her and says exactly once in natural Korean, \"루아야.\" Lua immediately straightens, keeps her spear pointed safely down and answers exactly once, \"네!\" The camera remains locked; only the current speaker moves their mouth and the other stays silent."), beat(5, "Maintain the same two-shot, distance and eyeline with no cut or isolated talking head. The Old Fisherman studies Lua calmly and says exactly once in natural Korean, \"바다는 고집으로 되는 게 아니다.\" Only he speaks. Lua remains silent with closed lips; her defensive posture softens by a few centimeters, her eyes lower and the familiar warning briefly hurts her. Keep both reactions visible and the spear solid in Lua's hands."), beat(5, "After a short quiet beat, the Old Fisherman turns his head toward the distant cliff. The camera performs the clip's only move: a slow motivated pan and slight lateral slide along his gaze until the cave mouth becomes visible in the background while both characters remain in the foreground. He alone warns in natural Korean, \"오늘은 동굴 쪽 가지 마라. 폭풍 뒤에는 뭐가 밀려올지 몰라.\" Lua says nothing, keeps her lips closed and follows his gaze. End in a settled composition linking them to the cave; no extra speech or abrupt camera move.")],
     },
     {
         "scene_id": "SC01-002", "clip_id": "SC01-002_M05", "title": "푸른 동굴을 향해", "seconds": 12,
         "source": "EP01 S#2 — 루아 단독, 동굴 빛을 보고 몰래 달려감", "mode": "new_anchor", "refs": [ref(1, "lua"), ref(3, "spear", prop=True)],
-        "anchor": "Lua alone at the edge of the coastal village with the distant cliff cave visible beyond wet rocks. A faint blue pulse comes from the cave mouth. Lua holds her fishing spear and has a clear hidden route away from the adults. No fisherman or children are visible.",
-        "relay": [beat(6, "Lua notices the faint blue pulse inside the cliff cave, checks that the adults are distracted and thinks naturally in Korean, \"가라면 가지 말아야 하는데.\""), beat(6, "The blue light flashes again. Lua thinks, \"저렇게 빛나면 가야지.\" She grips her spear and runs toward the cave.")],
+        "review_ko": "루아가 동굴까지 육지로 이어진 돌길 앞에 혼자 서 있다. 동굴에서 나온 첫 번째 푸른빛이 젖은 돌을 따라 루아의 얼굴과 눈에 닿는다. 루아는 입을 움직이지 않는 한국어 내면 독백으로 \"가라면 가지 말아야 하는데.\"라고 생각한다. 더 강한 두 번째 푸른빛을 본 뒤 \"저렇게 빛나면 가야지.\"라고 생각하고 작살을 몸 옆에 고정한 채 동굴을 향해 달린다. 카메라는 낮은 후방 3/4 구도로 따라가며, 루아의 모든 발걸음은 물이 아닌 단단한 돌길을 딛는다.",
+        "anchor": "Lua alone at the edge of the coastal village with the distant cliff cave visible beyond wet rocks. A continuous raised stone footpath connects her position to the cave entirely over land, with no water crossing. A faint blue pulse comes from the cave mouth. Lua holds her fishing spear and has a clear route along solid stone.",
+        "relay": [beat(6, "Begin from the supplied anchor in a stable medium-wide profile composition with Lua alone in the foreground and the distant cave mouth readable at the end of one continuous raised stone footpath. Storm-damaged fishing nets hang softly out of focus at one edge of frame. Keep the camera still as the cave emits one faint blue pulse; let the reflected light travel across wet stones before reaching Lua's face and catching in her eyes. Lua stops, turns only her eyes toward the cave, then cautiously checks behind her without moving her feet. She keeps the fixed spear low and thinks exactly once in an internal Korean voice-over, \"가라면 가지 말아야 하는데.\" Her lips remain closed because this is thought, not spoken dialogue."), beat(6, "A stronger second blue pulse gives Lua a clear visual decision cue. Begin with a brief closer reaction as curiosity replaces hesitation; Lua suppresses a grin and thinks exactly once in the same internal Korean voice-over, \"저렇게 빛나면 가야지.\" Her lips stay closed. She tightens one hand around the same rigid spear, pivots toward the cave and breaks into a purposeful run along the raised stone footpath. On her pivot, the camera transitions into the clip's single motivated move: a smooth low rear three-quarter tracking shot that follows at a steady distance, keeping Lua, the solid path and the glowing cave on the same travel axis. Every running step lands visibly on solid stone; she never enters or crosses water. The spear remains secured along her side, never swings wildly, duplicates or merges with her body. End with Lua running toward the cave entrance as the blue glow grows larger ahead, not yet inside it and without an abrupt cut.")],
     },
     {
         "scene_id": "SC01-003", "clip_id": "SC01-003_M01", "title": "해안 동굴 진입", "seconds": 18,
@@ -196,7 +215,63 @@ CLIPS: list[dict[str, Any]] = [
         "anchor": "A night view from inside Lua's house toward the window and silent sea. Lua stands at the window in the foreground while the Black Jellyfish floats above the distant water outside, translucent black body filled with ink-like smoke and long tentacles below. Young Mir is off-screen and heard only.",
         "relay": [beat(6, "Lua notices the sea has become unnaturally silent and approaches the window. Young Mir gives a low warning growl from off-screen."), beat(6, "Lua sees the Black Jellyfish floating above the night sea and asks naturally in Korean, \"저게… 널 찾으러 온 거야?\""), beat(6, "The Black Jellyfish slowly turns toward Lua's house as ink-like smoke rotates inside its body and the long tentacles trail beneath the water. Cut to black.")],
     },
+
 ]
+
+
+RECONFIGURATION_PLAN: dict[str, dict[str, Any]] = {
+    "SC01-001_M01": {"actions": ["유지"], "priority": "P2", "reason": "인물 없는 환경 중심의 두 단계 변화로 장시간 연출 부담이 낮음", "next": "폭풍과 푸른빛의 공간 깊이만 앵커에서 확인"},
+    "SC01-001_M02": {"actions": ["컷 분할", "새 앵커 필요"], "priority": "P0", "reason": "기둥 붕괴·미르 공개·해류 이동이 한 클립에 중첩됨", "next": "붕괴와 발견 / 해류에 떠밀림 두 컷으로 분리"},
+    "SC01-001_M03": {"actions": ["컷 분할", "새 앵커 필요"], "priority": "P0", "reason": "추격·검은 형상 변화·방어 파동·상승이 20초에 중첩됨", "next": "추격 접근 / 꼬리 결정 방어와 탈출로 분리"},
+    "SC01-001_M04": {"actions": ["프롬프트 수정"], "priority": "P1", "reason": "꿈 장면은 컷 변화를 허용하지만 시각 상태와 음성 순서를 긍정형으로 정리해야 함", "next": "기억 파편과 두 음성 구간을 시각적 두 박자로 단순화"},
+    "SC01-001_M05": {"actions": ["유지"], "priority": "P2", "reason": "파도에 실려 해안으로 이동하는 하나의 환경 주도 동작", "next": "해류 방향과 도착 지점이 앵커에서 이어지는지만 확인"},
+    "SC01-002_M01": {"actions": ["프롬프트 수정", "새 앵커 필요"], "priority": "P0", "reason": "직접 찌르기보다 조준 컷과 다음 낙상 컷의 편집 연결이 안정적임", "next": "조준 전용 3~4초 컷과 작살·물고기 분리 앵커로 재작성"},
+    "SC01-002_M01B": {"actions": ["유지"], "priority": "P2", "reason": "긍정형 낙상 프롬프트에서 앞으로 꼬꾸라지는 동작이 확보됨", "next": "선택 후보를 보존하고 카메라 강조는 후처리로 보완"},
+    "SC01-002_M01C": {"actions": ["유지"], "priority": "P2", "reason": "회복 동작 후보 3개가 모두 사용 가능 수준으로 안정됨", "next": "현재 앵커·5초·무대사 설정 고정"},
+    "SC01-002_M02": {"actions": ["유지"], "priority": "P2", "reason": "두 인물 고정 대화와 화자 분리 방식이 검증됨", "next": "정상 후보 선택 후 외형·대사 구조 고정"},
+    "SC01-002_M03": {"actions": ["유지"], "priority": "P2", "reason": "단독 화자 구조에서 사용 가능한 후보가 확보됨", "next": "손과 작살을 함께 움직이는 제스처 없이 현재 후보 사용"},
+    "SC01-002_M04": {"actions": ["컷 분할"], "priority": "P0", "reason": "호명·답변·훈계·동굴 경고·카메라 팬이 한 클립에 과밀함", "next": "호명과 짧은 답변 / 경고와 동굴 시선 이동 두 컷으로 분리"},
+    "SC01-002_M05": {"actions": ["유지"], "priority": "P2", "reason": "육상 경로가 명확한 앵커에서 후보 선택 방식이 검증됨", "next": "돌길이 끝까지 보이는 후보와 시드 보존"},
+    "SC01-003_M01": {"actions": ["컷 분할"], "priority": "P0", "reason": "동굴 진입·수심 확인·두 문장·미르 반응이 한 클립에 중첩됨", "next": "동굴 진입 / 허세 섞인 호출과 소리 반응으로 분리"},
+    "SC01-003_M02": {"actions": ["컷 분할", "새 앵커 필요"], "priority": "P0", "reason": "접근·작살 내리기·미르 공개·세 문장이 첫 대면에 중첩됨", "next": "미르 실루엣 발견 / 눈맞춤과 짧은 반응으로 분리"},
+    "SC01-003_M03": {"actions": ["컷 분할", "새 앵커 필요"], "priority": "P0", "reason": "손 내밀기·농담·물기·통증 반응이 복합 접촉 동작임", "next": "손을 내미는 안심 컷 / 이미 손가락을 문 상태의 반응 컷으로 분리"},
+    "SC01-003_M04": {"actions": ["프롬프트 수정"], "priority": "P1", "reason": "꿈 영상은 유지 가능하지만 세 변화를 긍정형 시각 박자로 정리해야 함", "next": "푸른 폭발 / 용궁과 검은 뿌리 / 심장빛 귀환 순서를 간결화"},
+    "SC01-003_M05": {"actions": ["프롬프트 수정"], "priority": "P1", "reason": "두 인물 반응과 두 문장은 가능하지만 표식·시선·발화 우선순위 조정이 필요함", "next": "루아 반응 중심으로 손동작을 줄이고 느린 접근 카메라 하나만 유지"},
+    "SC01-003_M06": {"actions": ["컷 분할", "새 앵커 필요"], "priority": "P0", "reason": "외부 음성 반응·천 감싸기·들기·퇴장이 한 클립에 중첩됨", "next": "외부 부름과 결정 / 이미 감싼 미르를 안고 퇴장으로 분리"},
+    "SC01-004_M01": {"actions": ["컷 분할", "새 앵커 필요"], "priority": "P0", "reason": "문 닫기·물그릇·생선 거부·조개 포옹과 네 대사가 20초에 과밀함", "next": "집 도착 / 물그릇 / 생선 반응 / 조개 선택으로 분리"},
+    "SC01-004_M02": {"actions": ["컷 분할", "새 앵커 필요"], "priority": "P0", "reason": "상상 속 목소리·문 차단·숨김 결정·밥값 대사가 함께 있어 추가 인물 위험이 큼", "next": "문을 막는 불안 반응 / 미르에게 머물라고 말하는 대화로 분리"},
+    "SC01-004_M03": {"actions": ["컷 분할", "새 앵커 필요"], "priority": "P0", "reason": "물방울 생성·이동·이마 충돌·대사·표식 공명이 연속 물리 사건임", "next": "물방울과 이마 접촉 / 루아 반응과 두 표식 공명으로 분리"},
+    "SC01-005_M01": {"actions": ["프롬프트 수정"], "priority": "P1", "reason": "수면 상태의 느린 공명은 유지 가능하지만 꿈 전환을 단일 시각 흐름으로 정리해야 함", "next": "두 표식의 동시 박동과 방이 꿈으로 녹아드는 한 방향 전환으로 단순화"},
+    "SC01-005_M02": {"actions": ["프롬프트 수정"], "priority": "P1", "reason": "꿈 장면의 상징적 컷 변화는 허용되나 그림자 정체성과 음성 순서가 중요함", "next": "미르와 미래 그림자의 동일 정체성을 앵커에서 분명히 하고 두 음성을 분리"},
+    "SC01-005_M03": {"actions": ["컷 분할", "새 앵커 필요"], "priority": "P0", "reason": "깨기·들기·감정 공유·포옹·손목 핥기가 복합 2인 접촉 장면임", "next": "잠에서 깨 미르를 안기 / 공포 공유와 표식 진정으로 분리"},
+    "SC01-005_M04": {"actions": ["컷 분할", "새 앵커 필요"], "priority": "P0", "reason": "실내 창가 반응과 외부 해파리 위협을 한 공간에서 동시에 처리하기 어려움", "next": "루아의 창가 발견 / 바다 위 해파리가 집을 향하는 외부 컷으로 분리"},
+}
+
+from scripts.ep01_msr_prompt_experiment_v2 import apply_reconfiguration
+
+CLIPS, RECONFIGURATION_PLAN = apply_reconfiguration(CLIPS, RECONFIGURATION_PLAN, ref, beat)
+
+SC01_002_REVIEW_EVIDENCE = {
+    "review_count": 75,
+    "verdicts": {"acceptable": 19, "needs_improvement": 17, "reject": 27, "unrated": 12},
+    "by_clip": {
+        "SC01-002_M01": {"reviews": 23, "acceptable": 0},
+        "SC01-002_M01B": {"reviews": 9, "acceptable": 0},
+        "SC01-002_M01C": {"reviews": 6, "acceptable": 4},
+        "SC01-002_M02": {"reviews": 11, "acceptable": 3},
+        "SC01-002_M03": {"reviews": 13, "acceptable": 3},
+        "SC01-002_M04": {"reviews": 4, "acceptable": 2},
+        "SC01-002_M05": {"reviews": 9, "acceptable": 7},
+    },
+    "rules": [
+        "Preserve proven one- and two-speaker dialogue layouts instead of splitting them by default.",
+        "Use visible traversable ground, one travel axis and one motivated tracking move for locomotion.",
+        "Split only physical state transitions such as falling, lifting, biting, wrapping and small-object contact.",
+        "Make the anchor describe the exact opening physical state before the primary action.",
+        "Treat late reference-image reappearance as a workflow or post-production review issue, not prompt overload.",
+    ],
+}
+
 
 
 def render_markdown(payload: dict[str, Any], title: str, source: str) -> str:
@@ -216,7 +291,7 @@ def render_markdown(payload: dict[str, Any], title: str, source: str) -> str:
 def build_payload(item: dict[str, Any], sequence: int, previous: str | None, following: str | None) -> dict[str, Any]:
     references = item["refs"]
     world = item.get("world") or STYLE
-    anchor_id = f"ANC_{item['clip_id']}"
+    anchor_id = item.get("anchor_id") or f"ANC_{item['clip_id']}"
     anchor = {
         "background_id": anchor_id,
         "description": item["anchor"],
@@ -238,6 +313,14 @@ def build_payload(item: dict[str, Any], sequence: int, previous: str | None, fol
         "clip_id": item["clip_id"],
         "sequence": sequence,
         "source_scene_refs": item["source"],
+        "review_intent_ko": item.get("review_ko") or item["source"].split("—", 1)[-1].strip(),
+        "prompt_experiment": {
+            "version": 2,
+            "basis": "SC01-002 full candidate review history",
+            "source_clip": RECONFIGURATION_PLAN[item["clip_id"]].get("source_clip", item["clip_id"]),
+            "implementation": RECONFIGURATION_PLAN[item["clip_id"]].get("implementation", "experiment_v2_ready"),
+            "review_focus_ko": RECONFIGURATION_PLAN[item["clip_id"]]["next"],
+        },
         "previous_clip": previous,
         "next_clip": following,
         "continuity_mode": item["mode"],
@@ -257,10 +340,18 @@ def build_payload(item: dict[str, Any], sequence: int, previous: str | None, fol
             "aspect_ratio": "16:9",
             "recommended_resolution": {"width": 1280, "height": 704},
             "prompt": (
-                "Premium stylized 3D animated feature-film video anchor, cinematic widescreen 16:9. "
+                "Single cinematic opening frame for premium stylized 3D video generation, widescreen 16:9. "
+                "Depict the exact physical starting state before the clip's primary action, not a summary of later events. "
+                "Make every required body, prop, contact point, travel path and screen direction clearly readable in one composition. "
                 + item["anchor"]
-                + " One coherent moment, not a storyboard or collage."
+                + " One coherent moment, not a storyboard, collage, motion trail or sequence of poses."
             ),
+            "prompt_contract": {
+                "opening_state_only": True,
+                "single_primary_action_support": True,
+                "readable_contact_geometry": True,
+                "review_basis": "SC01-002 full candidate review set",
+            },
             "negative_prompt": NEGATIVE,
             "continuity_notes": [
                 "Use a selected stable end frame from the previous clip when continuity_mode is continuity_frame."
@@ -309,6 +400,10 @@ def main() -> None:
         }
         scene_seconds[item["scene_id"]] = scene_seconds.get(item["scene_id"], 0) + item["seconds"]
         continuity_count += int(item["mode"] == "continuity_frame")
+    action_counts: dict[str, int] = {}
+    for plan in RECONFIGURATION_PLAN.values():
+        for action in plan["actions"]:
+            action_counts[action] = action_counts.get(action, 0) + 1
     manifest = {
         "schema_version": 3,
         "project_id": PROJECT_ID,
@@ -334,6 +429,12 @@ def main() -> None:
         "new_anchor_count": len(CLIPS) - continuity_count,
         "continuity_frame_count": continuity_count,
         "status_summary": {"awaiting_background": len(CLIPS), "reviewed": 0, "invalid": 0},
+        "reconfiguration_summary": action_counts,
+        "prompt_experiment": {
+            "version": 2,
+            "basis": "SC01-002 full candidate review history",
+            "evidence": SC01_002_REVIEW_EVIDENCE,
+        },
         "notes": [
             "Built from RaisingaDragonSeason01/Raising a Dragon.md only.",
             "Legacy Director and MSR prompt projects were not used as prompt sources.",
@@ -375,14 +476,36 @@ def main() -> None:
         )
     plan_lines.extend([
         "",
-        "## 중요 컷 경계",
+        "## SC01-002 전체 리뷰에서 확정한 생성 규칙",
         "",
-        "- `SC01-002_M01`: 루아 단독으로 등장해 물고기를 놓치고 얕은 물에서 다시 일어나는 순간까지 한 번에 처리합니다.",
-        "- `SC01-002_M02`: 마을아이 1이 새로 등장하므로 새 앵커로 시작합니다.",
-        "- `SC01-002_M03`: 마을아이 2의 대사는 루아+마을아이 2 전용 컷으로 분리합니다.",
-        "- `SC01-002_M04`: 루아+늙은 어부의 경고 대화를 15초 한 구간으로 처리합니다.",
-        "- `SC01-002_M05`: 다시 루아 단독이 되고 동굴이 새 목표가 되므로 새 앵커로 시작합니다.",
-        "- 같은 집·동굴에서 동일한 두 인물이 이어질 때만 안정적인 이전 영상 프레임을 계승합니다.",
+        "- M02·M03·M04의 안정된 1·2인 대화 구조는 유지하며 화자와 입 동작만 명확히 분리합니다.",
+        "- M05처럼 이동 경로가 화면에 보이고 한 방향 축과 동기 있는 추적 카메라가 있으면 이동 장면을 유지합니다.",
+        "- M01 계열처럼 낙상·들기·물기·감싸기·작은 물체 접촉으로 물리 상태가 급변할 때만 컷을 분할합니다.",
+        "- 이미지 프롬프트는 이후 행동을 요약하지 않고 영상 시작 직전의 자세·접촉점·이동 공간을 한 장에 고정합니다.",
+        "- 참조 이미지가 영상 중후반에 다시 나타나는 현상은 프롬프트 과밀과 분리해 워크플로우·후처리 리뷰 항목으로 기록합니다.",
+        "",
+    ])
+    plan_lines.extend([
+        "## EP01 재구성 분류",
+        "",
+        "| 우선순위 | 구간 | 분류 | 판단 근거 | 다음 조치 |",
+        "|---|---|---|---|---|",
+    ])
+    for item in CLIPS:
+        plan = RECONFIGURATION_PLAN[item["clip_id"]]
+        plan_lines.append(
+            f"| {plan['priority']} | `{item['clip_id']}` | {', '.join(plan['actions'])} | "
+            f"{plan['reason']} | {plan['next']} |"
+        )
+    plan_lines.extend([
+        "",
+        "## 재구성 실행 순서",
+        "",
+        "1. P0 컷 분할·새 앵커 대상의 렌더 단위를 먼저 다시 설계합니다.",
+        "2. P1 프롬프트 수정 대상은 긍정형 상태 변화와 카메라 이동 하나로 단순화합니다.",
+        "3. P2 유지 대상은 검증된 후보와 시드를 고정하고 재생성을 최소화합니다.",
+        "4. 새 앵커는 자세·접촉점·소품 각도·이동 공간을 확인한 뒤 후보 생성을 등록합니다.",
+        "5. 선택한 짧은 컷을 편집 스튜디오에서 조립한 뒤 전체 영상만 최종 검수합니다.",
         "",
     ])
     (project / "EP01_MSR_CONTINUITY_PLAN.md").unlink(missing_ok=True)

@@ -20,6 +20,7 @@ PROJECT_DIR = ROOT / "director_prompt_projects" / PROJECT_ID
 TARGET_SCENES = {"SC01-001", "SC01-002", "SC01-003"}
 
 
+@unittest.skip("LTX 2.3 EP01 Director 프로젝트 보관 처리")
 class CinematicReconfigureEp01Test(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -69,7 +70,13 @@ class CinematicReconfigureEp01Test(unittest.TestCase):
                 image = segment["scene_image"]
                 beat = cinematic["beats"][index]
                 self.assertEqual(image["prompt_version"], IMAGE_VERSION)
-                self.assertEqual(image["review_status"], "changes_required")
+                if image.get("source_path"):
+                    self.assertEqual(image["status"], "approved")
+                    self.assertEqual(image["review_status"], "approved")
+                    self.assertTrue((PROJECT_DIR / image["source_path"]).is_file())
+                else:
+                    self.assertEqual(image["status"], "missing")
+                    self.assertEqual(image["review_status"], "changes_required")
                 self.assertEqual(image["camera_axis"], beat["camera_axis"])
                 self.assertEqual(image["recommended_guide_strength"], 0.75)
                 self.assertTrue(segment["director_prompt_base"])

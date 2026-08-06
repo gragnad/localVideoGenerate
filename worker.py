@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Any
 
 import candidate_set_status
+import benchmark_worker
+import benchmark_jobs
+import model_test_ai_reviewer
+import model_test_r2v_ai_reviewer
+import model_test_reviews
 from batch_manager import (
     attach_job_to_batch,
     batch_generation_is_terminal,
@@ -704,6 +709,16 @@ def process_job(job_dir: Path) -> None:
     job_type = str(request.get("job_type") or "generate")
     if job_type == "assemble":
         process_assemble_job(job_dir)
+        return
+    if job_type == "model_benchmark":
+        benchmark_worker.process_benchmark_job(
+            job_dir,
+            ensure_client=ensure_comfy_ready,
+            queue_position=queue_position,
+            stop_requested=lambda: STOP_REQUESTED,
+            poll_seconds=POLL_SECONDS,
+            timeout_seconds=COMFY_TIMEOUT_SECONDS,
+        )
         return
     if job_type == "upscale":
         raise ValueError("업스케일/디테일 보강 작업은 더 이상 지원하지 않습니다.")
@@ -1739,6 +1754,198 @@ def _entity_status_for_review_batch(batch_status: str) -> str | None:
     return None
 
 
+def _set_benchmark_ai_review_status(
+    job_id: str,
+    review_status: str,
+    *,
+    batch_id: str,
+    **fields: Any,
+) -> None:
+    job_dir = JOBS_ROOT / job_id
+    current = read_json(job_dir / "status.json", {}) or {}
+    generation_status = str(current.get("status") or "completed")
+    update_status(
+        job_dir,
+        generation_status,
+        ai_review_status=review_status,
+        ai_review_batch_id=batch_id,
+        ai_review_updated_at=now_iso(),
+        **fields,
+    )
+
+
+def run_model_benchmark_ai_review_batch(batch: dict[str, Any]) -> dict[str, Any]:
+    batch_id = str(batch["batch_id"])
+    session_ids = [str(value) for value in batch.get("test_session_ids") or []]
+    batch = update_batch(
+        ENGINE_ROOT, batch_id,
+        status="switching_to_vllm",
+        stage="engine_switch_to_vllm",
+        next_stage="benchmark_qwen_review",
+        ai_review_errors=[],
+        engine_switch_error=None,
+        message="ComfyUI를 종료하고 모델 테스트용 Qwen3-Omni를 시작합니다.",
+    )
+    benchmark_jobs.set_session_review_status(
+        ENGINE_ROOT, session_ids, "switching_to_qwen_review",
+    )
+    try:
+        ensure_vllm_engine()
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        batch = update_batch(
+            ENGINE_ROOT, batch_id,
+            status="engine_switch_failed",
+            stage="engine_switch_failed",
+            next_stage="stopped",
+            engine_switch_error=error,
+            engine_snapshot=engine_snapshot(),
+            message=f"Qwen 검수 엔진 전환 실패 · {error}",
+        )
+        benchmark_jobs.set_session_review_status(
+            ENGINE_ROOT, session_ids, "ai_review_failed",
+        )
+        return restore_comfy_after_review(batch, outcome="engine_switch_failed")
+
+    batch = update_batch(
+        ENGINE_ROOT, batch_id,
+        status="ai_reviewing",
+        stage="benchmark_qwen_review",
+        next_stage="benchmark_qwen_review",
+        engine_snapshot=engine_snapshot(),
+        message="Qwen3-Omni가 모델 테스트 원본 영상 전체를 고정 기준으로 검수하고 있습니다.",
+    )
+    benchmark_jobs.set_session_review_status(
+        ENGINE_ROOT, session_ids, "ai_reviewing",
+    )
+    reports: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    review_job_ids = _active_review_job_ids(batch)
+    for job_id in review_job_ids:
+        current = read_json(JOBS_ROOT / job_id / "status.json", {}) or {}
+        if current.get("status") == "completed":
+            _set_benchmark_ai_review_status(
+                job_id, "queued", batch_id=batch_id, ai_review_error=None,
+            )
+    for job_id in review_job_ids:
+        job_dir = JOBS_ROOT / job_id
+        status = read_json(job_dir / "status.json", {}) or {}
+        if status.get("status") != "completed":
+            continue
+        try:
+            _set_benchmark_ai_review_status(
+                job_id, "reviewing", batch_id=batch_id, ai_review_error=None,
+            )
+            request = read_json(job_dir / "request.json", {}) or {}
+            manifest = read_json(job_dir / "manifest.json", {}) or {}
+            video_path = _review_video_for_parent(batch, job_id)
+            is_r2v = str(
+                (request.get("benchmark_contract") or {}).get("input_mode") or ""
+            ) == "h3_r2v_multi_reference"
+            reviewer = model_test_r2v_ai_reviewer if is_r2v else model_test_ai_reviewer
+            report = reviewer.review_benchmark_video(
+                video_path=video_path,
+                request=request,
+                batch_id=batch_id,
+                job_id=job_id,
+            )
+            report["reviewed_at"] = now_iso()
+            report_path = job_dir / "benchmark_ai_review_report.json"
+            atomic_write_json(report_path, report)
+            save_review = (
+                model_test_reviews.save_r2v_ai_review
+                if is_r2v else model_test_reviews.save_ai_review
+            )
+            saved = save_review(
+                ENGINE_ROOT,
+                str(request.get("run_id") or ""),
+                report["review"],
+                source_path=str(report_path),
+            )
+            report["review_revision"] = saved["review"]["revision"]
+            atomic_write_json(report_path, report)
+            manifest["benchmark_ai_review"] = report
+            manifest["benchmark_ai_review_report_path"] = str(report_path)
+            manifest["updated_at"] = now_iso()
+            atomic_write_json(job_dir / "manifest.json", manifest)
+            reports.append(report)
+            _set_benchmark_ai_review_status(
+                job_id,
+                "completed",
+                batch_id=batch_id,
+                ai_review_revision=report["review_revision"],
+                ai_review_error=None,
+            )
+            log_event(
+                "benchmark_qwen_review_job_complete",
+                batch_id=batch_id,
+                job_id=job_id,
+                verdict=report["review"].get("verdict"),
+                issue_count=len(report["review"].get("issues") or []),
+            )
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            errors.append({"job_id": job_id, "error": error})
+            _set_benchmark_ai_review_status(
+                job_id,
+                "failed",
+                batch_id=batch_id,
+                ai_review_error=error[:2000],
+            )
+            log_event(
+                "benchmark_qwen_review_job_failed",
+                batch_id=batch_id,
+                job_id=job_id,
+                error=error,
+            )
+
+    report_path = (
+        ENGINE_ROOT / "runtime" / "batches" / batch_id
+        / "benchmark_ai_review_reports.json"
+    )
+    atomic_write_json(report_path, {
+        "batch_id": batch_id,
+        "review_mode": "qwen_omni_direct_video_strict_prompt_compliance_v2",
+        "rubric_version": "strict_prompt_compliance_v2",
+        "reviewed_at": now_iso(),
+        "reports": reports,
+        "errors": errors,
+    })
+    if reports and not errors:
+        status = "benchmark_review_completed"
+        stage = "completed"
+        next_stage = "completed"
+        session_status = "review_completed"
+        message = f"Qwen 모델 테스트 검수 {len(reports)}건을 완료했습니다."
+    elif reports:
+        status = "benchmark_review_completed_with_failures"
+        stage = "completed_with_failures"
+        next_stage = "completed"
+        session_status = "review_completed_with_failures"
+        message = f"Qwen 검수 {len(reports)}건 완료 · 실패 {len(errors)}건"
+    else:
+        status = "benchmark_review_failed"
+        stage = "benchmark_qwen_review_failed"
+        next_stage = "stopped"
+        session_status = "ai_review_failed"
+        message = f"Qwen 모델 테스트 검수에 실패했습니다 · {len(errors)}건"
+    batch = update_batch(
+        ENGINE_ROOT, batch_id,
+        status=status,
+        stage=stage,
+        next_stage=next_stage,
+        benchmark_ai_review_count=len(reports),
+        benchmark_ai_review_failed_count=len(errors),
+        benchmark_ai_review_report_path=str(report_path),
+        ai_review_errors=errors,
+        message=message,
+    )
+    benchmark_jobs.set_session_review_status(
+        ENGINE_ROOT, session_ids, session_status,
+    )
+    return restore_comfy_after_review(batch, outcome=status)
+
+
 def run_ai_review_batch(batch: dict[str, Any]) -> dict[str, Any]:
     batch_id = str(batch["batch_id"])
     current_cycle = int(batch.get("current_cycle") or 0)
@@ -2161,6 +2368,8 @@ def advance_review_batches() -> dict[str, Any] | None:
     if status == "ready_for_review_preparation":
         return prepare_direct_video_review_batch(batch)
     if status == "ready_for_ai_review":
+        if str(batch.get("batch_mode") or "") == "model_benchmark":
+            return run_model_benchmark_ai_review_batch(batch)
         return run_ai_review_batch(batch)
     if status == "retake_queued":
         return monitor_retake_batch(batch)
@@ -2188,11 +2397,14 @@ def maybe_finalize_open_batch() -> dict[str, Any] | None:
             str(item.get("batch_id") or ""),
         )
     )
-    if not open_batches:
+    actionable_batches = [
+        item for item in open_batches if item.get("generation_job_ids")
+    ]
+    if not actionable_batches:
         log_batch_state(None)
         return None
 
-    batch = open_batches[0]
+    batch = actionable_batches[0]
     batch_id = str(batch["batch_id"])
     log_batch_state(batch)
 

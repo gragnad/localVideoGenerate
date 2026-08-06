@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 
 DIRECTOR_PROMPT_PROJECTS_DIR = "director_prompt_projects"
+ARCHIVE_MARKER_FILE = ".ep01-archived"
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".jfif"}
 JSON_BLOCK_RE = re.compile(r"```json\s*\n([\s\S]*?)\n```", re.IGNORECASE)
 VALID_STATUSES = {
@@ -46,7 +47,13 @@ def _safe_component(value: str, label: str) -> str:
 
 
 def _project_dir(root: Path, project_id: str) -> Path:
-    return projects_root(root) / _safe_component(project_id, "project_id")
+    project_id = _safe_component(project_id, "project_id")
+    project_dir = projects_root(root) / project_id
+    if (project_dir / ARCHIVE_MARKER_FILE).is_file():
+        raise DirectorPromptProjectError(
+            f"보관 처리된 EP01 Director 프로젝트입니다: {project_id}"
+        )
+    return project_dir
 
 
 def _resolve_under(base: Path, relative_path: str) -> Path:
@@ -411,6 +418,8 @@ def list_projects_action(root: Path, _data: dict[str, Any] | None = None) -> dic
     for entry in sorted(base.iterdir()):
         if not entry.is_dir():
             continue
+        if (entry / ARCHIVE_MARKER_FILE).is_file():
+            continue
         manifest = {}
         manifest_path = entry / "manifest.json"
         if manifest_path.is_file():
@@ -520,4 +529,3 @@ def resolve_asset_action(root: Path, data: dict[str, Any]) -> dict[str, Any]:
             f"{_normalize_scene_asset_path(project_id, asset_path)}"
         ),
     }
-

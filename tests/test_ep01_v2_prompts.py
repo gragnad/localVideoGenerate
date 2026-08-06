@@ -78,6 +78,7 @@ EP01_DIALOGUE_LINES = [
 KOREAN_IN_PROMPT = re.compile(r"[가-힣]{2,}")
 
 
+@unittest.skip("LTX 2.3 EP01 프롬프트 프로젝트 보관 처리")
 class Ep01V2PromptProjectTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

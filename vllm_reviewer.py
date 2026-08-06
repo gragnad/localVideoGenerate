@@ -571,8 +571,14 @@ def _response_json(
     video_metadata: dict[str, Any],
     reference_video_data_url: str | None = None,
     reference_video_metadata: dict[str, Any] | None = None,
+    image_data_urls: list[dict[str, str]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], str]:
     user_content: list[dict[str, Any]] = []
+    for item in image_data_urls or []:
+        user_content.extend([
+            {"type": "text", "text": str(item.get("label") or "REFERENCE IMAGE")},
+            {"type": "image_url", "image_url": {"url": str(item.get("url") or "")}},
+        ])
     if reference_video_data_url:
         user_content.extend([
             {"type":"text","text":"REFERENCE SELECTED CANDIDATE VIDEO (preserve identity, motion, timing and composition):"},
@@ -1220,4 +1226,3 @@ def review_video(
         report["raw_message"] = review_message
 
     return report
-

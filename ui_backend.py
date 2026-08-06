@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import candidate_set_status
+import candidate_reviews
 import correction_policy
 import director_prompt_projects
 import director_prompt_overview
@@ -16,6 +17,13 @@ from job_queue import atomic_write_json, now_iso, queue_claim_lock, read_json, u
 from video_assembler import VideoAssemblerError, assemble_clips, probe_video
 import msr_prompt_projects
 import msr_sequence_v2
+import model_test_registry
+import model_test_assets
+import model_test_reviews
+import model_test_analysis
+import model_test_exports
+import benchmark_jobs
+import workflow_adapter
 import seed_library
 from workflow_builder import KOREAN_SPEECH_POLICY, resolve_seed, sanitize_token
 
@@ -30,7 +38,7 @@ VIDEO_SUFFIXES={".mp4",".webm",".mov",".mkv",".avi"}
 COMFY_ROOT=Path(os.environ.get("COMFY_ROOT", HOME/"ai-workspace/apps/ComfyUI")).expanduser()
 COMFY_OUTPUT=Path(os.environ.get("COMFY_OUTPUT_DIR", COMFY_ROOT/"output")).expanduser()
 COMFY_INPUT=Path(os.environ.get("COMFY_INPUT_DIR", COMFY_ROOT/"input")).expanduser()
-DELETABLE_BATCH_STATUSES={"completed_generation_only","review_completed","manual_review_required","modification_limit_reached","review_complete_needs_modification","ai_review_failed","failed","cancelled","pipeline_failed","awaiting_candidate_selection","candidate_selected"}
+DELETABLE_BATCH_STATUSES={"completed_generation_only","review_completed","manual_review_required","modification_limit_reached","review_complete_needs_modification","ai_review_failed","failed","cancelled","pipeline_failed","awaiting_candidate_selection","candidate_selected","benchmark_completed","benchmark_completed_with_failures"}
 DEFAULT_GLOBAL="Project style: Original ocean fantasy growth-adventure world, cinematic fantasy realism, wide 16:9. "+KOREAN_SPEECH_POLICY
 CANDIDATE_SETS=ROOT/"runtime/candidate_sets"
 COMPOSITIONS=ROOT/"runtime/compositions"
@@ -179,8 +187,8 @@ def create_msr_action(data, target_batch_id: str):
         copied.append({"role":role,"original_name":str(row.get("original_name") or incoming.name),"stored_name":stored,"source_path":str(dest),"sha256":hashlib.sha256(raw).hexdigest(),"description":str(row.get("description") or "").strip(),"prompt":str(row.get("description") or role),"seconds":0,"order":index})
     snap=d/"selected_workflow_api.json";atomic_write_json(snap,_msr_api_template(len(references)))
     seed,raw_seed,seed_mode=resolve_video_seed(data);created=now_iso();width=int(data.get("width") or 1280);height=int(data.get("height") or 704)
-    req={"schema_version":2,"job_type":"generate","pipeline_stage":"initial_generation","job_id":jid,"batch_id":target_batch_id,"job_dir":str(d),"created_at":created,"job_name":name,"template_path":str(snap),"workflow_source_path":str(MSR_GRAPH),"workflow_filename":MSR_GRAPH.name,"workflow_kind":"msr_v2","workflow_kind_label":"후보 생성 (MSR V2)","comfy_url":os.environ.get("COMFY_URL","http://127.0.0.1:8188"),"comfy_public_url":os.environ.get("COMFY_PUBLIC_URL",""),"comfy_start_script":os.environ.get("COMFY_START_SCRIPT",str(HOME/"bin/ai-start-comfy")),"comfy_start_timeout":float(os.environ.get("COMFY_START_TIMEOUT","180")),"auto_start_comfy":True,"fps":24,"seed":seed,"seed_input":raw_seed,"seed_mode":seed_mode,"resolution":{"width":width,"height":height,"label":f"{width} × {height}"},"global_prompt":str(data.get("global_prompt") or DEFAULT_GLOBAL).strip(),"filename_prefix":f"video/jobs/{jid}/{token}","segments":copied,"msr_references":[row for row in copied if row["role"]!="background"],"msr_background":next(row for row in copied if row["role"]=="background"),"relay_segments":relay_segments,"relay_epsilon":float(data.get("epsilon") or 0.0011),"msr_reference_frame_count":65,"parent_job_id":None,"attempt":0,"automation":dict(batch.get("automation") or load_automation_settings(ROOT)),"candidate_set_id":str(data["candidate_set_id"]),"candidate_index":int(data["candidate_index"]),"candidate_count":int(data["candidate_count"]),"review_policy":"user_candidate_selection"}
-    man={k:req[k] for k in ("schema_version","job_id","batch_id","job_type","pipeline_stage","created_at","workflow_source_path","workflow_filename","workflow_kind","workflow_kind_label","seed","resolution","fps","segments","candidate_set_id","candidate_index","candidate_count","review_policy")};man.update(status="queued",outputs=[])
+    req={"schema_version":2,"job_type":"generate","pipeline_stage":"initial_generation","job_id":jid,"batch_id":target_batch_id,"job_dir":str(d),"created_at":created,"job_name":name,"template_path":str(snap),"workflow_source_path":str(MSR_GRAPH),"workflow_filename":MSR_GRAPH.name,"workflow_kind":"msr_v2","workflow_kind_label":"후보 생성 (MSR V2)","reference_mode":"up_to_four_subjects_plus_background","comfy_url":os.environ.get("COMFY_URL","http://127.0.0.1:8188"),"comfy_public_url":os.environ.get("COMFY_PUBLIC_URL",""),"comfy_start_script":os.environ.get("COMFY_START_SCRIPT",str(HOME/"bin/ai-start-comfy")),"comfy_start_timeout":float(os.environ.get("COMFY_START_TIMEOUT","180")),"auto_start_comfy":True,"fps":24,"seed":seed,"seed_input":raw_seed,"seed_mode":seed_mode,"resolution":{"width":width,"height":height,"label":f"{width} × {height}"},"global_prompt":str(data.get("global_prompt") or DEFAULT_GLOBAL).strip(),"filename_prefix":f"video/jobs/{jid}/{token}","segments":copied,"msr_references":[row for row in copied if row["role"]!="background"],"msr_background":next(row for row in copied if row["role"]=="background"),"relay_segments":relay_segments,"relay_epsilon":float(data.get("epsilon") or 0.0011),"msr_reference_frame_count":65,"parent_job_id":None,"attempt":0,"automation":dict(batch.get("automation") or load_automation_settings(ROOT)),"candidate_set_id":str(data["candidate_set_id"]),"candidate_index":int(data["candidate_index"]),"candidate_count":int(data["candidate_count"]),"review_policy":"user_candidate_selection"}
+    man={k:req[k] for k in ("schema_version","job_id","batch_id","job_type","pipeline_stage","created_at","workflow_source_path","workflow_filename","workflow_kind","workflow_kind_label","seed","resolution","fps","segments","reference_mode","candidate_set_id","candidate_index","candidate_count","review_policy")};man.update(status="queued",outputs=[])
     atomic_write_json(d/"request.json",req);atomic_write_json(d/"manifest.json",man);attach_job_to_batch(ROOT,target_batch_id,jid,"candidate");update_status(d,"queued",stage="MSR V2 후보 생성 worker 대기",message="MSR V2 후보 작업이 큐에 등록되었습니다.",progress=0,created_at=created)
     return {"job_id":jid,"batch_id":target_batch_id}
 
@@ -229,7 +237,7 @@ def create_msr_sequence_action(data: dict[str,Any], target_batch_id: str):
     snap=d/"selected_workflow_api.json";atomic_write_json(snap,_msr_api_template(slots))
     seed,raw_seed,seed_mode=resolve_video_seed(normalized);created=now_iso();width=int(normalized.get("width") or 1280);height=int(normalized.get("height") or 704)
     ref_rows=[row for row in copied if row["role"]!="anchor"];anchor_row=next(row for row in copied if row["role"]=="anchor")
-    req={"schema_version":3,"workflow":"msr_sequence_v2","prompt_strategy":"msr_continuity_v1","director_prompt_inheritance":False,"job_type":"generate","pipeline_stage":"initial_generation","job_id":jid,"batch_id":target_batch_id,"job_dir":str(d),"created_at":created,"job_name":name,"template_path":str(snap),"workflow_source_path":str(MSR_GRAPH),"workflow_filename":MSR_GRAPH.name,"workflow_kind":"msr_sequence_v2","workflow_kind_label":"연속 구간 후보 생성 (MSR V2)","comfy_url":os.environ.get("COMFY_URL","http://127.0.0.1:8188"),"comfy_public_url":os.environ.get("COMFY_PUBLIC_URL",""),"comfy_start_script":os.environ.get("COMFY_START_SCRIPT",str(HOME/"bin/ai-start-comfy")),"comfy_start_timeout":float(os.environ.get("COMFY_START_TIMEOUT","180")),"auto_start_comfy":True,"fps":24,"seed":seed,"seed_input":raw_seed,"seed_mode":seed_mode,"resolution":{"width":width,"height":height,"label":f"{width} × {height}"},"world_prompt":normalized["world_prompt"],"global_prompt":normalized["global_prompt"],"filename_prefix":f"video/jobs/{jid}/{token}","segments":copied,"msr_references":ref_rows,"msr_anchor":anchor_row,"msr_background":anchor_row,"relay_segments":normalized["relay_segments"],"requested_seconds":normalized["requested_seconds"],"maximum_duration_seconds":20.0,"continuity_mode":normalized["continuity_mode"],"source_scene_refs":normalized["source_scene_refs"],"relay_epsilon":float(normalized.get("epsilon") or 0.0011),"msr_reference_frame_count":65,"parent_job_id":None,"attempt":0,"automation":dict(batch.get("automation") or load_automation_settings(ROOT)),"candidate_set_id":str(normalized["candidate_set_id"]),"candidate_index":int(normalized["candidate_index"]),"candidate_count":int(normalized["candidate_count"]),"review_policy":"user_candidate_selection"}
+    req={"schema_version":3,"workflow":"msr_sequence_v2","prompt_strategy":"msr_continuity_v1","director_prompt_inheritance":False,"job_type":"generate","pipeline_stage":"initial_generation","job_id":jid,"batch_id":target_batch_id,"job_dir":str(d),"created_at":created,"job_name":name,"template_path":str(snap),"workflow_source_path":str(MSR_GRAPH),"workflow_filename":MSR_GRAPH.name,"workflow_kind":"msr_sequence_v2","workflow_kind_label":"연속 구간 후보 생성 (MSR V2)","comfy_url":os.environ.get("COMFY_URL","http://127.0.0.1:8188"),"comfy_public_url":os.environ.get("COMFY_PUBLIC_URL",""),"comfy_start_script":os.environ.get("COMFY_START_SCRIPT",str(HOME/"bin/ai-start-comfy")),"comfy_start_timeout":float(os.environ.get("COMFY_START_TIMEOUT","180")),"auto_start_comfy":True,"fps":24,"seed":seed,"seed_input":raw_seed,"seed_mode":seed_mode,"resolution":{"width":width,"height":height,"label":f"{width} × {height}"},"world_prompt":normalized["world_prompt"],"global_prompt":normalized["global_prompt"],"reference_mode":normalized["reference_mode"],"review_intent_ko":normalized["review_intent_ko"],"filename_prefix":f"video/jobs/{jid}/{token}","segments":copied,"msr_references":ref_rows,"msr_anchor":anchor_row,"msr_background":anchor_row,"relay_segments":normalized["relay_segments"],"requested_seconds":normalized["requested_seconds"],"maximum_duration_seconds":20.0,"continuity_mode":normalized["continuity_mode"],"source_scene_refs":normalized["source_scene_refs"],"relay_epsilon":float(normalized.get("epsilon") or 0.0011),"msr_reference_frame_count":65,"parent_job_id":None,"attempt":0,"automation":dict(batch.get("automation") or load_automation_settings(ROOT)),"candidate_set_id":str(normalized["candidate_set_id"]),"candidate_index":int(normalized["candidate_index"]),"candidate_count":int(normalized["candidate_count"]),"review_policy":"user_candidate_selection"}
     man={k:req[k] for k in ("schema_version","workflow","prompt_strategy","director_prompt_inheritance","job_id","batch_id","job_type","pipeline_stage","created_at","workflow_source_path","workflow_filename","workflow_kind","workflow_kind_label","seed","resolution","fps","segments","candidate_set_id","candidate_index","candidate_count","review_policy")};man.update(status="queued",outputs=[])
     atomic_write_json(d/"request.json",req);atomic_write_json(d/"manifest.json",man);attach_job_to_batch(ROOT,target_batch_id,jid,"candidate");update_status(d,"queued",stage="MSR 연속 구간 후보 생성 worker 대기",message="새 MSR 연속 생성 후보가 큐에 등록되었습니다.",progress=0,created_at=created)
     return {"job_id":jid,"batch_id":target_batch_id}
@@ -247,6 +255,9 @@ def create_msr_sequence_candidates_action(data: dict[str,Any]):
         if machine.get("workflow")!="msr_sequence_v2" or machine.get("prompt_strategy")!="msr_continuity_v1":
             raise ValueError("기존 Director/MSR 프롬프트 프로젝트는 새 MSR 연속 생성에 사용할 수 없습니다.")
         if not prompt_clip.get("can_register_msr"):raise ValueError(f"MSR 후보 등록이 차단되었습니다: {prompt_clip.get('registration_block_reason') or '검수가 완료되지 않았습니다.'}")
+        machine_reference_mode=str(machine.get("reference_mode") or "subject_references")
+        if machine_reference_mode!=normalized["reference_mode"]:
+            raise ValueError(f"프롬프트 프로젝트 참조 모드가 일치하지 않습니다: {machine_reference_mode}")
     candidate_set_id=f"cset_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(2)}";raw_seed=int(normalized.get("seed",-1));modulus=(1<<63)-1
     settings=load_automation_settings(ROOT);batch=create_new_open_batch(ROOT,settings);batch_id=str(batch["batch_id"]);created=now_iso();jobs=[]
     update_batch(ROOT,batch_id,candidate_set_ids=[candidate_set_id],batch_mode="candidate_selection",registration_closed=False,message=f"새 MSR 연속 구간 후보 {count}개를 등록하고 있습니다.")
@@ -272,6 +283,69 @@ def load_candidate_set(candidate_set_id: str)->dict[str,Any]:
 def save_candidate_set(payload: dict[str,Any])->dict[str,Any]:
     path=candidate_set_path(str(payload["candidate_set_id"]));path.parent.mkdir(parents=True,exist_ok=True)
     payload["updated_at"]=now_iso();atomic_write_json(path,payload);return payload
+
+
+def _candidate_review_context(data: dict[str,Any])->tuple[dict[str,Any],dict[str,Any]]:
+    candidate_set_id=str(data.get("candidate_set_id") or "").strip()
+    job_id=str(data.get("job_id") or "").strip()
+    payload=load_candidate_set(candidate_set_id)
+    if job_id not in {str(value) for value in payload.get("candidate_job_ids") or []}:
+        raise ValueError("해당 후보군에 속하지 않는 작업입니다.")
+    item=job(job_id)
+    if not _is_candidate_generation_job(item):
+        raise ValueError("후보 생성 작업만 문제 리뷰를 저장할 수 있습니다.")
+    if str(item["request"].get("candidate_set_id") or "")!=candidate_set_id:
+        raise ValueError("후보 작업의 후보군 정보가 일치하지 않습니다.")
+    return payload,item
+
+
+def _candidate_review_expected_default_ko(request: dict[str,Any])->str:
+    direct=str(request.get("review_intent_ko") or "").strip()
+    if direct:return direct
+    clip_id=str(request.get("job_name") or "").strip()
+    if clip_id and Path(clip_id).name==clip_id:
+        source=str(request.get("source_scene_refs") or "").strip()
+        matches=[]
+        for path in (ROOT/"prompt_projects").rglob(f"{clip_id}.md"):
+            try:
+                payload=msr_prompt_projects.extract_machine_payload(path.read_text(encoding="utf-8"))
+            except (OSError,ValueError,msr_prompt_projects.PromptProjectError):
+                continue
+            translated=str(payload.get("review_intent_ko") or "").strip()
+            if not translated:continue
+            same_source=bool(source and str(payload.get("source_scene_refs") or "").strip()==source)
+            matches.append((not same_source,str(path),translated))
+        if matches:
+            matches.sort()
+            return matches[0][2]
+    return candidate_reviews.expected_default_ko(request)
+
+
+def get_candidate_review_action(data: dict[str,Any])->dict[str,Any]:
+    payload,item=_candidate_review_context(data)
+    review=candidate_reviews.load_review(ROOT,str(payload["candidate_set_id"]),str(item["job_id"]))
+    return {
+        "review":review,
+        "expected_default_ko":_candidate_review_expected_default_ko(item["request"]),
+    }
+
+
+def save_candidate_review_action(data: dict[str,Any])->dict[str,Any]:
+    payload,item=_candidate_review_context(data)
+    review=candidate_reviews.save_review(
+        ROOT,
+        candidate_set_id=str(payload["candidate_set_id"]),
+        job_id=str(item["job_id"]),
+        candidate_index=int(item["request"].get("candidate_index") or 0) or None,
+        request=item["request"],
+        job_dir=item["dir"],
+        data=data,
+    )
+    summaries=dict(payload.get("candidate_reviews") or {})
+    summaries[item["job_id"]]=candidate_reviews.review_summary(review)
+    payload["candidate_reviews"]=summaries
+    save_candidate_set(payload)
+    return {"review":review,"summary":summaries[item["job_id"]]}
 
 def sync_candidate_sets_action(data):
     candidate_set_id=str(data.get("candidate_set_id") or "").strip()
@@ -1018,6 +1092,8 @@ def delete_queued_job_action(data):
         if status!="queued":raise RuntimeError(f"대기 중인 작업만 삭제할 수 있습니다: {job_id} ({status})")
         batch_id=str(item["request"].get("batch_id") or "")
         update_status(item["dir"],"cancelled",stage="사용자가 대기 작업 삭제",message="큐에 제출되기 전에 사용자가 삭제했습니다.",cancelled_at=now_iso())
+        if str(item["request"].get("job_type") or "") == "model_benchmark":
+            benchmark_jobs.record_result(ROOT, item["request"], status="cancelled")
         shutil.rmtree(item["dir"])
     _detach_job_from_batch(batch_id,job_id)
     return {"job_id":job_id,"batch_id":batch_id,"deleted":True}
@@ -1057,6 +1133,8 @@ def force_cancel_batch_action(data):
             cancelled_ids.append(current["job_id"])
             stamp=now_iso()
             update_status(current["dir"],"cancelled",stage="사용자가 배치 강제 종료",message=f"배치 {batch_id} 강제 종료로 취소했습니다.",cancelled_at=stamp,progress=0.0)
+            if str(current["request"].get("job_type") or "") == "model_benchmark":
+                benchmark_jobs.record_result(ROOT, current["request"], status="cancelled")
             manifest=current["manifest"];manifest.update(status="cancelled",cancelled_at=stamp,updated_at=stamp);atomic_write_json(current["dir"]/"manifest.json",manifest)
     update_batch(ROOT,batch_id,status="cancelled",stage="cancelled",next_stage="stopped",cancelled_at=now_iso(),forced_cancel=True,cancelled_job_ids=cancelled_ids,message=f"사용자가 배치를 강제 종료했습니다. 취소 작업 {len(cancelled_ids)}개")
     clear_open_batch_pointer(ROOT,batch_id)
@@ -1173,6 +1251,155 @@ def list_msr_prompt_backgrounds_action(data)->dict[str,Any]:
 def save_msr_prompt_background_link_action(data)->dict[str,Any]:
     return msr_prompt_projects.save_background_link_action(ROOT,data)
 
+def model_test_dashboard_action(_data=None):
+    return model_test_registry.dashboard(ROOT, WF_DIR)
+
+def register_test_model_action(data):
+    return model_test_registry.register_model(ROOT, data)
+
+def register_test_workflow_action(data):
+    return model_test_registry.register_workflow(ROOT, WF_DIR, data)
+
+def inspect_test_workflow_action(data):
+    with model_test_registry.open_registry(ROOT) as connection:
+        return workflow_adapter.inspect_workflow(connection, str(data.get("workflow_profile_id") or ""))
+
+def register_test_adapter_action(data):
+    with model_test_registry.open_registry(ROOT) as connection:
+        return workflow_adapter.register_adapter(connection, data)
+
+def create_model_test_session_action(data):
+    return model_test_registry.create_session(ROOT, data)
+
+def delete_model_test_session_action(data):
+    return model_test_registry.delete_session(ROOT, str(data.get("session_id") or ""))
+
+def save_model_test_asset_action(data):
+    with model_test_registry.open_registry(ROOT) as connection:
+        return model_test_assets.save_and_link(ROOT, connection, data)
+
+def unlink_model_test_asset_action(data):
+    with model_test_registry.open_registry(ROOT) as connection:
+        return model_test_assets.unlink(connection, data)
+
+def save_r2v_shared_asset_action(data):
+    with model_test_registry.open_registry(ROOT) as connection:
+        return model_test_assets.save_and_link_r2v_shared(ROOT, connection, data)
+
+def unlink_r2v_shared_asset_action(data):
+    with model_test_registry.open_registry(ROOT) as connection:
+        return model_test_assets.unlink_r2v_shared(connection, data)
+
+def model_test_asset_file_action(data):
+    with model_test_registry.open_registry(ROOT) as connection:
+        return {"path": str(model_test_assets.resolve_file(ROOT, connection, str(data.get("asset_id") or "")))}
+
+def preflight_model_test_session_action(data):
+    with model_test_registry.open_registry(ROOT) as connection:
+        return workflow_adapter.preflight_session(connection, str(data.get("session_id") or ""))
+def model_test_session_results_action(data):
+    return model_test_reviews.session_results(ROOT, str(data.get("session_id") or ""))
+
+def model_test_run_review_action(data):
+    run_id = str(data.get("run_id") or "")
+    if data.get("review") is None:
+        return model_test_reviews.run_review(ROOT, run_id)
+    return model_test_reviews.save_review(ROOT, run_id, dict(data.get("review") or {}))
+
+def model_test_comparison_action(_data=None):
+    return model_test_reviews.comparison(ROOT)
+def model_test_analysis_action(data):
+    return model_test_analysis.analyze(
+        ROOT, str(data.get("model_id") or ""),
+        str(data.get("workflow_profile_id") or "") or None,
+    )
+
+def save_model_test_policy_action(data):
+    return model_test_analysis.save_policy(ROOT, data)
+
+def set_model_test_policy_active_action(data):
+    return model_test_analysis.set_policy_active(
+        ROOT, str(data.get("policy_id") or ""), bool(data.get("active")),
+    )
+
+def create_model_test_followup_action(data):
+    return model_test_registry.create_followup_session(ROOT, data)
+
+def export_model_tests_action(data):
+    return model_test_exports.create_export(ROOT, str(data.get("format") or "json"))
+
+
+
+def queue_model_test_session_action(data):
+    return benchmark_jobs.queue_session(ROOT, str(data.get("session_id") or ""))
+
+def queue_model_test_ai_review_action(data):
+    return benchmark_jobs.queue_ai_review(ROOT, str(data.get("session_id") or ""))
+
+def cancel_model_test_ai_review_action(data):
+    session_id = str(data.get("session_id") or "").strip()
+    if not session_id:
+        raise ValueError("테스트 세션 ID가 필요합니다.")
+    with model_test_registry.open_registry(ROOT) as connection:
+        row = connection.execute(
+            "SELECT batch_id FROM test_session_batches WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+    if not row:
+        raise FileNotFoundError("연결된 모델 테스트 배치를 찾을 수 없습니다.")
+    batch_id = str(row["batch_id"])
+    batch = load_batch(ROOT, batch_id)
+    if not batch:
+        raise FileNotFoundError("연결된 모델 테스트 배치 이력을 찾을 수 없습니다.")
+    active = {
+        "ready_for_review_preparation", "preparing_video_review",
+        "ready_for_ai_review", "switching_to_vllm", "ai_reviewing",
+    }
+    if str(batch.get("status") or "") not in active:
+        return {"session_id": session_id, "batch_id": batch_id, "already_stopped": True}
+
+    _run_control(["systemctl", "--user", "stop", "ltx-video-worker.service"], 40)
+    stopped_at = now_iso()
+    update_batch(
+        ROOT, batch_id,
+        status="benchmark_review_cancelled", stage="cancelled", next_stage="stopped",
+        cancelled_at=stopped_at, review_cancelled=True,
+        message="사용자가 구기준 Qwen 검수를 중단했습니다. 완료된 리뷰는 유지됩니다.",
+    )
+    benchmark_jobs.set_session_review_status(ROOT, [session_id], "review_cancelled")
+    cancelled_count = 0
+    for job_id in batch.get("review_job_ids") or []:
+        job_dir = JOBS / str(job_id)
+        status_payload = read_json(job_dir / "status.json", {}) or {}
+        if str(status_payload.get("ai_review_batch_id") or batch_id) != batch_id:
+            continue
+        if str(status_payload.get("ai_review_status") or "") not in {
+            "queued", "preparing", "reviewing",
+        }:
+            continue
+        update_status(
+            job_dir, str(status_payload.get("status") or "completed"),
+            ai_review_status="cancelled", ai_review_batch_id=batch_id,
+            ai_review_updated_at=stopped_at,
+        )
+        cancelled_count += 1
+    warnings = []
+    try:
+        _run_control([str(HOME / "bin/ai-stop-vllm")])
+    except Exception as exc:
+        warnings.append(f"ai-stop-vllm: {type(exc).__name__}: {exc}")
+    try:
+        _run_control(["systemctl", "--user", "start", "ltx-video-worker.service"], 30)
+    except Exception as exc:
+        warnings.append(f"worker start: {type(exc).__name__}: {exc}")
+    return {
+        "session_id": session_id, "batch_id": batch_id,
+        "status": "benchmark_review_cancelled",
+        "cancelled_review_count": cancelled_count,
+        "completed_reviews_preserved": True,
+        "warnings": warnings,
+    }
+
 def main():
     action=sys.argv[1]; data=json.load(sys.stdin)
     director_actions={
@@ -1192,6 +1419,6 @@ def main():
         out=sync_candidate_sets_action(data)
         print(json.dumps(out,ensure_ascii=False))
         return
-    out={"prompt":prompt_action,"create":create_action,"create_candidates":create_candidates_action,"create_msr_candidates":create_msr_candidates_action,"create_msr_sequence_candidates":create_msr_sequence_candidates_action,"select_candidate":select_candidate_action,"manual":manual_action,"clip_library":clip_library_action,"source_image_library":source_image_library_action,"source_image_file":source_image_file_action,"source_image_preview":source_image_preview_action,"delete_source_image":delete_source_image_action,"like_seed":like_seed_action,"unlike_seed":unlike_seed_action,"list_seed_library":list_seed_library_action,"recommend_seeds":recommend_seeds_action,"delete_seed_library":delete_seed_library_action,"list_compositions":list_compositions_action,"create_composition":create_composition_action,"update_composition":update_composition_action,"assemble_composition":assemble_composition_action,"import_composition_video":import_composition_video_action,"register_candidate_final_review":register_candidate_final_review_action,"register_composition_final_review":register_composition_final_review_action,"delete_composition":delete_composition_action,"delete_candidate_set":delete_candidate_set_action,"delete_lineage":delete_lineage_action,"delete_queued_job":delete_queued_job_action,"force_cancel_batch":force_cancel_batch_action,"delete_batch_history":delete_batch_history_action,"list_msr_sequence_projects":list_msr_sequence_projects_action,"list_msr_sequence_project_clips":list_msr_sequence_project_clips_action,"get_msr_sequence_project_clip":get_msr_sequence_project_clip_action,"list_msr_prompt_projects":list_msr_prompt_projects_action,"list_msr_prompt_project_clips":list_msr_prompt_project_clips_action,"get_msr_prompt_project_clip":get_msr_prompt_project_clip_action,"msr_prompt_asset":msr_prompt_asset_action,"list_msr_prompt_backgrounds":list_msr_prompt_backgrounds_action,"save_msr_prompt_background_link":save_msr_prompt_background_link_action,"settings":lambda d:save_automation_settings(ROOT,d)}[action](data)
+    out={"prompt":prompt_action,"create":create_action,"create_candidates":create_candidates_action,"create_msr_candidates":create_msr_candidates_action,"create_msr_sequence_candidates":create_msr_sequence_candidates_action,"select_candidate":select_candidate_action,"get_candidate_review":get_candidate_review_action,"save_candidate_review":save_candidate_review_action,"manual":manual_action,"clip_library":clip_library_action,"source_image_library":source_image_library_action,"source_image_file":source_image_file_action,"source_image_preview":source_image_preview_action,"delete_source_image":delete_source_image_action,"like_seed":like_seed_action,"unlike_seed":unlike_seed_action,"list_seed_library":list_seed_library_action,"recommend_seeds":recommend_seeds_action,"delete_seed_library":delete_seed_library_action,"list_compositions":list_compositions_action,"create_composition":create_composition_action,"update_composition":update_composition_action,"assemble_composition":assemble_composition_action,"import_composition_video":import_composition_video_action,"register_candidate_final_review":register_candidate_final_review_action,"register_composition_final_review":register_composition_final_review_action,"delete_composition":delete_composition_action,"delete_candidate_set":delete_candidate_set_action,"delete_lineage":delete_lineage_action,"delete_queued_job":delete_queued_job_action,"force_cancel_batch":force_cancel_batch_action,"delete_batch_history":delete_batch_history_action,"list_msr_sequence_projects":list_msr_sequence_projects_action,"list_msr_sequence_project_clips":list_msr_sequence_project_clips_action,"get_msr_sequence_project_clip":get_msr_sequence_project_clip_action,"list_msr_prompt_projects":list_msr_prompt_projects_action,"list_msr_prompt_project_clips":list_msr_prompt_project_clips_action,"get_msr_prompt_project_clip":get_msr_prompt_project_clip_action,"msr_prompt_asset":msr_prompt_asset_action,"list_msr_prompt_backgrounds":list_msr_prompt_backgrounds_action,"save_msr_prompt_background_link":save_msr_prompt_background_link_action,"model_test_dashboard":model_test_dashboard_action,"register_test_model":register_test_model_action,"register_test_workflow":register_test_workflow_action,"inspect_test_workflow":inspect_test_workflow_action,"register_test_adapter":register_test_adapter_action,"create_model_test_session":create_model_test_session_action,"delete_model_test_session":delete_model_test_session_action,"preflight_model_test_session":preflight_model_test_session_action,"queue_model_test_session":queue_model_test_session_action,"queue_model_test_ai_review":queue_model_test_ai_review_action,"cancel_model_test_ai_review":cancel_model_test_ai_review_action,"model_test_session_results":model_test_session_results_action,"model_test_run_review":model_test_run_review_action,"model_test_comparison":model_test_comparison_action,"model_test_analysis":model_test_analysis_action,"save_model_test_policy":save_model_test_policy_action,"set_model_test_policy_active":set_model_test_policy_active_action,"create_model_test_followup":create_model_test_followup_action,"export_model_tests":export_model_tests_action,"save_model_test_asset":save_model_test_asset_action,"unlink_model_test_asset":unlink_model_test_asset_action,"save_r2v_shared_asset":save_r2v_shared_asset_action,"unlink_r2v_shared_asset":unlink_r2v_shared_asset_action,"model_test_asset_file":model_test_asset_file_action,"settings":lambda d:save_automation_settings(ROOT,d)}[action](data)
     print(json.dumps(out,ensure_ascii=False))
 if __name__=="__main__":main()

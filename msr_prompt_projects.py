@@ -12,6 +12,7 @@ import msr_sequence_v2
 
 PROMPT_PROJECTS_DIR_NAME = "prompt_projects"
 SCENARIO_PROJECT_DIR_NAME = "RaisingaDragonSeason01"
+ARCHIVE_MARKER_FILE = ".ep01-archived"
 BACKGROUND_CATALOG_FILE = "background_catalog.json"
 BACKGROUND_LINKS_FILE = "background_links.json"
 MAX_CLIP_SECONDS = 30.0
@@ -336,13 +337,20 @@ def validate_machine_payload(root: Path, payload: dict[str, Any], *, project_id:
         errors.append(f"Relay Segment 합계({relay_total})와 requested_seconds({requested})가 일치하지 않습니다.")
 
     references = payload.get("references") or []
-    if not references:
+    reference_mode = str(payload.get("reference_mode") or "subject_references")
+    if not references and reference_mode != "anchor_as_reference":
         errors.append("references가 비어 있습니다.")
     if is_sequence_v2:
         try:
-            normalized_references = msr_sequence_v2.normalize_references(list(references))
+            normalized_references = (
+                []
+                if reference_mode == "anchor_as_reference" and not references
+                else msr_sequence_v2.normalize_references(list(references))
+            )
             expected_global = msr_sequence_v2.compile_global_prompt(
-                str(payload.get("world_prompt") or ""), normalized_references
+                str(payload.get("world_prompt") or ""),
+                normalized_references,
+                reference_mode,
             )
             if str(payload.get("global_prompt") or "").strip() != expected_global:
                 errors.append("global_prompt는 새 MSR 세계관·캐릭터·소품 필드에서 다시 컴파일해야 합니다.")
@@ -409,7 +417,10 @@ def _project_dir(root: Path, project_id: str) -> Path:
     project_id = str(project_id or "").strip()
     if not project_id or Path(project_id).name != project_id or project_id in {".", ".."}:
         raise PromptProjectError("허용되지 않는 프로젝트 ID입니다.")
-    return prompt_projects_root(root) / project_id
+    project_dir = prompt_projects_root(root) / project_id
+    if (project_dir / ARCHIVE_MARKER_FILE).is_file():
+        raise PromptProjectError(f"보관 처리된 EP01 MSR 프로젝트입니다: {project_id}")
+    return project_dir
 
 
 def _clip_markdown_path(root: Path, project_id: str, clip_id: str) -> Path:
@@ -533,6 +544,8 @@ def list_prompt_projects_action(root: Path, _data: dict[str, Any] | None = None)
         return {"projects": projects}
     for entry in sorted(base.iterdir()):
         if not entry.is_dir():
+            continue
+        if (entry / ARCHIVE_MARKER_FILE).is_file():
             continue
         manifest_path = entry / "manifest.json"
         manifest = {}

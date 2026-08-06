@@ -15,6 +15,7 @@ PROJECT_DIR = ROOT / "director_prompt_projects" / PROJECT_ID
 CAMERA_TEST_CLIP_ID = "SC01-003_09"
 
 
+@unittest.skip("LTX 2.3 EP01 Director 프로젝트 보관 처리")
 class DirectorRaisingDragonEp01Test(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -43,15 +44,19 @@ class DirectorRaisingDragonEp01Test(unittest.TestCase):
         clips = director_prompt_projects.scan_project_clips(ROOT, PROJECT_ID)
         for clip in clips:
             self.assertTrue(clip["valid"], clip)
-            if clip["clip_id"] == CAMERA_TEST_CLIP_ID:
-                self.assertIn(
-                    clip["status"],
-                    {"image_review_required", "image_changes_required", "ready_for_director"},
-                )
+            path = ROOT / "director_prompt_projects" / clip["markdown_path"]
+            payload = director_prompt_projects.extract_machine_payload(
+                path.read_text(encoding="utf-8")
+            )
+            images = [segment["scene_image"] for segment in payload["segments"]]
+            if any(not image.get("source_path") for image in images):
+                self.assertEqual(clip["status"], "awaiting_scene_images", clip["clip_id"])
+            elif any(image.get("review_status") == "changes_required" for image in images):
+                self.assertEqual(clip["status"], "image_changes_required", clip["clip_id"])
+            elif any(image.get("review_status") != "approved" for image in images):
+                self.assertEqual(clip["status"], "image_review_required", clip["clip_id"])
             else:
-                self.assertEqual(
-                    clip["status"], "awaiting_scene_images", clip["clip_id"]
-                )
+                self.assertEqual(clip["status"], "ready_for_director", clip["clip_id"])
 
     def test_no_needs_confirmation(self):
         clips = director_prompt_projects.scan_project_clips(ROOT, PROJECT_ID)
@@ -74,8 +79,10 @@ class DirectorRaisingDragonEp01Test(unittest.TestCase):
                 self.assertTrue(seg["director_prompt"])
                 self.assertTrue(seg["scene_image"]["prompt"])
                 self.assertTrue(seg["scene_image"]["negative_prompt"])
-                if clip["clip_id"] == CAMERA_TEST_CLIP_ID:
-                    self.assertTrue(seg["scene_image"]["source_path"])
+                if seg["scene_image"].get("source_path"):
+                    self.assertTrue(
+                        (PROJECT_DIR / seg["scene_image"]["source_path"]).is_file()
+                    )
                     review_status = seg["scene_image"]["review_status"]
                     self.assertIn(
                         review_status, {"pending", "approved", "changes_required"}
@@ -83,7 +90,6 @@ class DirectorRaisingDragonEp01Test(unittest.TestCase):
                     expected = "approved" if review_status == "approved" else "uploaded"
                     self.assertEqual(seg["scene_image"]["status"], expected)
                 else:
-                    self.assertIsNone(seg["scene_image"]["source_path"])
                     self.assertEqual(seg["scene_image"]["status"], "missing")
 
     def test_character_registry_project_id(self):

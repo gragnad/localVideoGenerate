@@ -124,7 +124,7 @@ def find_next_queued_job(jobs_root: Path) -> Path | None:
         request = read_json(request_path(path), {}) or {}
         return (
             str(request.get("created_at") or ""),
-            int(request.get("candidate_index") or 0),
+            int(request.get("candidate_index") or request.get("queue_order") or 0),
             path.name,
         )
 

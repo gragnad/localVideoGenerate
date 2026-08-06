@@ -96,6 +96,7 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+@unittest.skip("LTX 2.3 EP01 프롬프트 프로젝트 보관 처리")
 class Ep01V3PromptProjectTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

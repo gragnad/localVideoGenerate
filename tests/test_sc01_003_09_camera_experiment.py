@@ -16,6 +16,7 @@ CLIP_PATH = (
 )
 
 
+@unittest.skip("LTX 2.3 EP01 카메라 실험 프로젝트 보관 처리")
 class SC0100309CameraExperimentTest(unittest.TestCase):
     def test_continuous_anchor_transition_contract(self):
         payload = director_prompt_projects.extract_machine_payload(

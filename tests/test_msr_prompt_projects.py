@@ -509,6 +509,7 @@ class MsrPromptProjectsTest(unittest.TestCase):
 
 
 class MsrPromptProjectsIntegrationTest(unittest.TestCase):
+    @unittest.skip("LTX 2.3 EP01 실제 프로젝트 보관 처리")
     def test_real_project_scan(self):
         if not (ROOT / "prompt_projects" / PROJECT_ID).is_dir():
             self.skipTest("prompt project not present")

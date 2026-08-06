@@ -27,6 +27,7 @@ def submission(image: Path) -> dict:
         "job_name": "continuity-test",
         "world_prompt": "Premium stylized 3D coastal fantasy animation.",
         "continuity_mode": "new_anchor",
+        "review_intent_ko": "루아가 물고기를 발견하고 놓친 뒤 얕은 물에서 일어난다.",
         "references": [
             {
                 "slot": 1,
@@ -73,6 +74,54 @@ class MSRSequenceV2Test(unittest.TestCase):
         self.assertIn("Picture 1 — Character", result["global_prompt"])
         self.assertIn("Picture 3 — Prop", result["global_prompt"])
         self.assertNotIn("CINEMATIC CAMERA BIBLE", result["global_prompt"])
+        self.assertEqual(
+            result["review_intent_ko"],
+            "루아가 물고기를 발견하고 놓친 뒤 얕은 물에서 일어난다.",
+        )
+
+    def test_anchor_as_reference_uses_scene_anchor_label(self):
+        with tempfile.TemporaryDirectory() as folder:
+            image = Path(folder) / "anchor.png"
+            image.write_bytes(b"same-anchor")
+            data = submission(image)
+            data["reference_mode"] = "anchor_as_reference"
+            data["references"] = [{
+                "slot": 1,
+                "role": "character_1",
+                "description": "The same storm-ocean composition anchor, with no visible character.",
+                "upload_path": str(image),
+                "original_name": "anchor.png",
+            }]
+            data["anchor"] = {
+                "description": "The same storm-ocean composition anchor.",
+                "upload_path": str(image),
+                "original_name": "anchor.png",
+            }
+            result = validate_submission(data)
+        self.assertEqual(result["reference_mode"], "anchor_as_reference")
+        self.assertEqual([row["slot"] for row in result["references"]], [1])
+        self.assertIn("Picture 1 — Scene Anchor", result["global_prompt"])
+        self.assertNotIn("Picture 1 — Character", result["global_prompt"])
+
+    def test_anchor_as_reference_workflow_uses_same_image_twice(self):
+        graph = json.loads(OFFICIAL_GRAPH.read_text(encoding="utf-8"))
+        template = graph_to_api(graph)
+        workflow, summary = build_msr_v2_workflow(
+            template=template,
+            references=[{"slot": 1, "name": "storm-anchor.png", "subfolder": "msr"}],
+            background={"name": "storm-anchor.png", "subfolder": "msr"},
+            relay_segments=[{"prompt": "The empty storm sea moves toward one blue signal.", "seconds": 12}],
+            global_prompt="Storm-ocean world. Picture 1 — Scene Anchor: the same empty storm composition.",
+            seed=123,
+            filename_prefix="tests/environment-anchor",
+            width=1280,
+            height=704,
+            maximum_duration_seconds=20,
+            prompt_strategy=PROMPT_STRATEGY,
+        )
+        self.assertEqual(summary["reference_slots"], [1])
+        self.assertEqual(workflow["29"]["inputs"]["image"], "msr/storm-anchor.png")
+        self.assertEqual(workflow["194"]["inputs"]["image"], "msr/storm-anchor.png")
 
     def test_more_than_twenty_seconds_is_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
