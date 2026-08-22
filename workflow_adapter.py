@@ -5,6 +5,9 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
+import re
+import secrets
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -12,9 +15,36 @@ from typing import Any
 from comfy_workflow_export import graph_to_api
 import evaluation_db
 
-BINDING_KEYS = ("prompt", "negative_prompt", "seed", "width", "height", "fps", "duration_seconds", "frame_count", "audio_frame_count", "filename_prefix", "reference_image")
+BINDING_KEYS = (
+    "prompt", "negative_prompt", "seed", "width", "height", "fps",
+    "duration_seconds", "frame_count", "audio_frame_count", "filename_prefix",
+    "reference_image", "last_reference_image",
+)
 REQUIRED_BINDINGS = {"prompt"}
 DEFAULTS = {"seed": 831913303995591, "width": 768, "height": 432, "fps": 24, "duration_seconds": 5, "frame_count": 121, "audio_frame_count": 121}
+SOL_ATTN_CLASS_TYPE = "SolAttnPatch"
+SOL_ATTN_SETTING_RULES = {
+    "tau": {"type": "float", "default": 1.3, "minimum": 0.0, "maximum": 4.0},
+    "start_percent": {"type": "float", "default": 0.2, "minimum": 0.0, "maximum": 1.0},
+    "end_percent": {"type": "float", "default": 0.9, "minimum": 0.0, "maximum": 1.0},
+    "min_tokens": {"type": "integer", "default": 4096, "minimum": 0, "maximum": 1 << 20},
+    "int8_qk": {"type": "boolean", "default": True},
+    "sink_conditioning": {
+        "type": "choice",
+        "default": "exact_kv_and_rows",
+        "choices": ("exact_kv", "exact_kv_and_rows", "off"),
+    },
+    "morton": {"type": "boolean", "default": False},
+    "morton_curve": {
+        "type": "choice",
+        "default": "2d_frame",
+        "choices": ("3d", "2d_frame"),
+    },
+    "int8_pv": {"type": "boolean", "default": True},
+    "verbose": {"type": "boolean", "default": False},
+    "use_tma": {"type": "boolean", "default": False},
+    "dense_blocks": {"type": "block_spec", "default": ""},
+}
 
 
 def _json(value: Any) -> str:
@@ -57,6 +87,112 @@ def load_api_workflow(connection, workflow_profile_id: str) -> tuple[dict[str, A
     if not isinstance(payload, dict) or not payload or any(not isinstance(node, dict) or "class_type" not in node for node in payload.values()):
         raise ValueError("ComfyUI API 워크플로우 형식이 아닙니다.")
     return payload, dict(row)
+
+
+def _sol_attn_node(workflow: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    matches = [
+        (str(node_id), node)
+        for node_id, node in workflow.items()
+        if str(node.get("class_type") or "") == SOL_ATTN_CLASS_TYPE
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "PINT8 워크플로우에는 Patch Sol-Attn 노드가 정확히 하나 있어야 합니다."
+        )
+    return matches[0]
+
+
+def has_sol_attn_patch(workflow: dict[str, Any]) -> bool:
+    """Return whether an API workflow contains a Patch Sol-Attn node."""
+    return any(
+        isinstance(node, dict)
+        and str(node.get("class_type") or "") == SOL_ATTN_CLASS_TYPE
+        for node in workflow.values()
+    )
+
+
+def normalize_sol_attn_settings(
+    workflow: dict[str, Any], raw: Any = None
+) -> dict[str, Any]:
+    """Validate one session's Sol-Attn overrides against the API workflow."""
+    _, node = _sol_attn_node(workflow)
+    if raw is None:
+        raw_values: dict[str, Any] = {}
+    elif isinstance(raw, dict):
+        raw_values = dict(raw)
+    else:
+        raise ValueError("Patch Sol-Attn 설정 형식이 올바르지 않습니다.")
+    unknown = set(raw_values) - set(SOL_ATTN_SETTING_RULES)
+    if unknown:
+        raise ValueError(
+            "지원하지 않는 Patch Sol-Attn 설정입니다: "
+            + ", ".join(sorted(unknown))
+        )
+
+    node_inputs = dict(node.get("inputs") or {})
+    result: dict[str, Any] = {}
+    for name, rule in SOL_ATTN_SETTING_RULES.items():
+        value = raw_values.get(name, node_inputs.get(name, rule["default"]))
+        value_type = rule["type"]
+        if value_type == "float":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"Patch Sol-Attn {name} 값은 숫자여야 합니다.")
+            value = float(value)
+            if not math.isfinite(value):
+                raise ValueError(f"Patch Sol-Attn {name} 값은 유한한 숫자여야 합니다.")
+            if value < float(rule["minimum"]) or value > float(rule["maximum"]):
+                raise ValueError(
+                    f"Patch Sol-Attn {name} 값은 {rule['minimum']}~{rule['maximum']}이어야 합니다."
+                )
+        elif value_type == "integer":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"Patch Sol-Attn {name} 값은 정수여야 합니다.")
+            if value < int(rule["minimum"]) or value > int(rule["maximum"]):
+                raise ValueError(
+                    f"Patch Sol-Attn {name} 값은 {rule['minimum']}~{rule['maximum']}이어야 합니다."
+                )
+        elif value_type == "boolean":
+            if not isinstance(value, bool):
+                raise ValueError(f"Patch Sol-Attn {name} 값은 true 또는 false여야 합니다.")
+        elif value_type == "choice":
+            if not isinstance(value, str) or value not in rule["choices"]:
+                raise ValueError(
+                    f"Patch Sol-Attn {name} 값은 "
+                    + ", ".join(rule["choices"])
+                    + " 중 하나여야 합니다."
+                )
+        elif value_type == "block_spec":
+            if not isinstance(value, str) or len(value) > 200:
+                raise ValueError("Patch Sol-Attn dense_blocks 형식이 올바르지 않습니다.")
+            compact = re.sub(r"\s+", "", value)
+            if any(
+                part and not re.fullmatch(r"-?\d+(?:--?\d+)?", part)
+                for part in compact.split(",")
+            ):
+                raise ValueError(
+                    "Patch Sol-Attn dense_blocks는 0-2,-1 형식으로 입력하세요."
+                )
+            value = compact
+        result[name] = value
+
+    if result["start_percent"] > result["end_percent"]:
+        raise ValueError(
+            "Patch Sol-Attn 시작 비율은 종료 비율보다 클 수 없습니다."
+        )
+    if not result["int8_qk"]:
+        if "int8_pv" in raw_values and result["int8_pv"]:
+            raise ValueError("Patch Sol-Attn INT8 PV는 INT8 QK가 켜져 있어야 합니다.")
+        result["int8_pv"] = False
+    return result
+
+
+def apply_sol_attn_settings(
+    workflow: dict[str, Any], raw: Any
+) -> dict[str, Any]:
+    settings = normalize_sol_attn_settings(workflow, raw)
+    _, node = _sol_attn_node(workflow)
+    node.setdefault("inputs", {}).update(settings)
+    return settings
 
 
 def inspect_workflow(connection, workflow_profile_id: str) -> dict[str, Any]:
@@ -108,7 +244,7 @@ def inspect_workflow(connection, workflow_profile_id: str) -> dict[str, Any]:
 
     suggestions = {
         "prompt": first_option(
-            ("PrimitiveStringMultiline", "CLIPTextEncode", "TextGenerateLTX2Prompt", "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo"),
+            ("PrimitiveStringMultiline", "CLIPTextEncode", "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo"),
             ("value", "text", "prompt"),
         ),
         "negative_prompt": first_option(("CLIPTextEncode",), ("text",)),
@@ -118,8 +254,7 @@ def inspect_workflow(connection, workflow_profile_id: str) -> dict[str, Any]:
         "height": titled_option("Height", "value"),
         "fps": titled_option("Frame Rate", "value"),
         "duration_seconds": titled_option("Duration", "value") or title_contains_option("duration", "value"),
-        "frame_count": first_option(("EmptyLTXVLatentVideo", "LiconMSR"), ("length", "frame_count")),
-        "audio_frame_count": first_option(("LTXVEmptyLatentAudio",), ("frames_number",)),
+        "frame_count": first_option(("EmptyVideoLatent",), ("length", "frame_count")),
         "filename_prefix": first_option(("SaveVideo", "SaveImage"), ("filename_prefix",)),
     }
     return {
@@ -177,6 +312,17 @@ def _validate_multi_reference(workflow: dict[str, Any], raw: Any) -> dict[str, A
     conditioning_node_id = str(raw.get("conditioning_node_id") or "").strip()
     input_prefix = str(raw.get("input_prefix") or "ref_images.ref_image_").strip()
     loader_node_ids = [str(value).strip() for value in (raw.get("loader_node_ids") or []) if str(value).strip()]
+    source_node_ids = [
+        str(value).strip()
+        for value in (raw.get("conditioning_source_node_ids") or [])
+        if str(value).strip()
+    ]
+    source_template_node_id = str(
+        raw.get("conditioning_source_template_node_id") or ""
+    ).strip()
+    source_image_input = str(
+        raw.get("conditioning_source_image_input") or "image"
+    ).strip()
     template_node_id = str(raw.get("loader_template_node_id") or (loader_node_ids[-1] if loader_node_ids else "")).strip()
     loader_input = str(raw.get("loader_input") or "image").strip()
     try:
@@ -194,20 +340,81 @@ def _validate_multi_reference(workflow: dict[str, Any], raw: Any) -> dict[str, A
         node = workflow.get(node_id)
         if not node or str(node.get("class_type")) != "LoadImage" or loader_input not in dict(node.get("inputs") or {}):
             raise ValueError(f"다중 레퍼런스 이미지 로더가 올바르지 않습니다: {node_id}.{loader_input}")
+    if source_node_ids:
+        if len(source_node_ids) < max_slots and not source_template_node_id:
+            raise ValueError("다중 레퍼런스 전처리 노드 개수가 부족합니다.")
+        for node_id in source_node_ids[:max_slots]:
+            if not workflow.get(node_id):
+                raise ValueError(
+                    f"다중 레퍼런스 컨디셔닝 소스 노드가 없습니다: {node_id}"
+                )
+    if source_template_node_id:
+        source_template = workflow.get(source_template_node_id)
+        if (
+            not source_template
+            or source_image_input not in dict(source_template.get("inputs") or {})
+        ):
+            raise ValueError(
+                "다중 레퍼런스 전처리 템플릿이 올바르지 않습니다: "
+                f"{source_template_node_id}.{source_image_input}"
+            )
     return {
         "conditioning_node_id": conditioning_node_id,
         "input_prefix": input_prefix,
         "loader_node_ids": loader_node_ids,
+        "conditioning_source_node_ids": source_node_ids,
+        "conditioning_source_template_node_id": source_template_node_id,
+        "conditioning_source_image_input": source_image_input,
         "loader_template_node_id": template_node_id,
         "loader_input": loader_input,
         "max_slots": max_slots,
     }
 
 
+def materialize_multi_reference_source(
+    compiled: dict[str, Any],
+    workflow: dict[str, Any],
+    multi_reference: dict[str, Any],
+    slot: int,
+    loader_id: str,
+    namespace: str,
+) -> str:
+    """Return a conditioner source, cloning its preprocessing chain when needed."""
+    source_node_ids = list(
+        multi_reference.get("conditioning_source_node_ids") or []
+    )
+    if slot <= len(source_node_ids):
+        return str(source_node_ids[slot - 1])
+    template_node_id = str(
+        multi_reference.get("conditioning_source_template_node_id") or ""
+    )
+    if not template_node_id:
+        return loader_id
+    source_id = f"{namespace}_ref_source_{slot}"
+    source = copy.deepcopy(workflow[template_node_id])
+    source_input = str(
+        multi_reference.get("conditioning_source_image_input") or "image"
+    )
+    source.setdefault("inputs", {})[source_input] = [loader_id, 0]
+    source.setdefault("_meta", {})["title"] = (
+        f"{namespace.title()} Picture {slot} Preprocess"
+    )
+    compiled[source_id] = source
+    return source_id
+
+
 def register_adapter(connection, data: dict[str, Any]) -> dict[str, Any]:
     workflow_profile_id = str(data.get("workflow_profile_id") or "").strip()
     if not workflow_profile_id:
         raise ValueError("워크플로우 프로필을 선택하세요.")
+    identity = connection.execute(
+        """SELECT m.provider,m.family,m.display_name,m.version
+             FROM workflow_profiles w JOIN models m ON m.model_id=w.model_id
+            WHERE w.workflow_profile_id=?""",
+        (workflow_profile_id,),
+    ).fetchone()
+    if identity and "ltx" in " ".join(str(value or "") for value in identity).lower():
+        raise ValueError("LTX 워크플로우는 과거 검수 데이터 열람 전용입니다.")
     workflow, _ = load_api_workflow(connection, workflow_profile_id)
     bindings = validate_bindings(workflow, dict(data.get("bindings") or {}))
     multi_reference = _validate_multi_reference(workflow, data.get("multi_reference"))
@@ -258,6 +465,19 @@ def _reference_role_index(role: str) -> int | None:
     except ValueError:
         return None
     return index if index >= 1 else None
+
+
+def _remove_optional_image_binding(
+    workflow: dict[str, Any], binding: dict[str, str]
+) -> None:
+    """Remove an unused optional image loader and every direct graph edge to it."""
+    node_id = str(binding["node_id"])
+    for node in workflow.values():
+        inputs = node.get("inputs") or {}
+        for input_name, value in list(inputs.items()):
+            if value == [node_id, 0]:
+                inputs.pop(input_name)
+    workflow.pop(node_id, None)
 
 
 def compile_case(connection, session: Any, case_version_id: str, repetition: int = 1) -> dict[str, Any]:
@@ -319,7 +539,7 @@ def compile_case(connection, session: Any, case_version_id: str, repetition: int
     if "frame_count" in generation:
         values["frame_count"] = int(generation["frame_count"])
     if "target_seconds" in generation:
-        values["duration_seconds"] = int(generation["target_seconds"])
+        values["duration_seconds"] = float(generation["target_seconds"])
     if contract.get("input_mode") == "h3_r2v_multi_reference":
         raw_frames = max(5, round(float(values["duration_seconds"]) * 24))
         values["frame_count"] = raw_frames + (5 - raw_frames % 17) % 17
@@ -328,30 +548,57 @@ def compile_case(connection, session: Any, case_version_id: str, repetition: int
         values["width"] = int(selected_width)
         values["height"] = int(selected_height)
     values["audio_frame_count"] = values["frame_count"]
-    values["seed"] = int(values["seed"]) + max(0, repetition - 1)
+    # Every benchmark run receives an independently resolved seed. The concrete
+    # value is persisted with the run so results remain reproducible afterward.
+    values["seed"] = secrets.randbits(63)
     canonical_prompt = _format_case_value(str(prompt_row["prompt_text"]), case_settings)
     intent_ko = _format_case_value(str(case["intent_ko"]), case_settings)
     values["prompt"] = _render_prompt(str(config.get("prompt_template") or "{prompt}"), canonical_prompt, intent_ko)
     values["negative_prompt"] = str(defaults.get("negative_prompt") or "")
-    reference = next((item for item in linked if item["role"] == "reference_image"), None)
-    values["reference_image"] = f"model_tests/{reference['sha256']}{Path(reference['path']).suffix.lower()}" if reference else ""
+    image_assets = {
+        role: next((item for item in linked if item["role"] == role), None)
+        for role in ("reference_image", "last_reference_image")
+    }
+    for role, asset in image_assets.items():
+        if asset:
+            values[role] = (
+                f"model_tests/{asset['sha256']}"
+                f"{Path(asset['path']).suffix.lower()}"
+            )
     values["filename_prefix"] = f"video/model-tests/{session['session_id']}/{case_version_id}_{repetition:02d}"
     if int(values["frame_count"]) > int(DEFAULTS["frame_count"]):
         missing_duration = []
         if "duration_seconds" not in bindings and "frame_count" not in bindings:
             missing_duration.append("duration_seconds 또는 frame_count")
-        direct_audio_frames = any(
-            str(node.get("class_type")) == "LTXVEmptyLatentAudio"
-            and not isinstance(dict(node.get("inputs") or {}).get("frames_number"), list)
-            for node in workflow.values()
-        )
-        if "frame_count" in bindings and "duration_seconds" not in bindings and direct_audio_frames and "audio_frame_count" not in bindings:
-            missing_duration.append("audio_frame_count")
         if missing_duration:
             return {"case_version_id": case_version_id, "status": "blocked", "blockers": ["장기 테스트 프레임 수 바인딩 필요: " + ", ".join(missing_duration)]}
+    workflow_settings = {}
+    if "workflow_settings_json" in session.keys():
+        workflow_settings = json.loads(session["workflow_settings_json"] or "{}")
+    if not isinstance(workflow_settings, dict):
+        raise ValueError("세션 워크플로우 설정 형식이 올바르지 않습니다.")
+    unknown_workflow_settings = set(workflow_settings) - {"sol_attn"}
+    if unknown_workflow_settings:
+        raise ValueError(
+            "지원하지 않는 세션 워크플로우 설정입니다: "
+            + ", ".join(sorted(unknown_workflow_settings))
+        )
+
     compiled = copy.deepcopy(workflow)
+    normalized_workflow_settings: dict[str, Any] = {}
+    # Old PINT8 sessions predate workflow_settings_json and therefore contain
+    # an empty object.  Resolve the graph's effective values even in that case
+    # so queue metadata and runtime identities describe the actual execution.
+    if "sol_attn" in workflow_settings or has_sol_attn_patch(compiled):
+        normalized_workflow_settings["sol_attn"] = apply_sol_attn_settings(
+            compiled, workflow_settings.get("sol_attn")
+        )
     for key, binding in bindings.items():
-        compiled[binding["node_id"]]["inputs"][binding["input"]] = values[key]
+        if key in values:
+            compiled[binding["node_id"]]["inputs"][binding["input"]] = values[key]
+    last_reference_binding = bindings.get("last_reference_image")
+    if last_reference_binding and not image_assets["last_reference_image"]:
+        _remove_optional_image_binding(compiled, last_reference_binding)
     compiled_assets = []
     if multi_assets and multi_reference:
         conditioner_inputs = compiled[multi_reference["conditioning_node_id"]]["inputs"]
@@ -367,14 +614,33 @@ def compile_case(connection, session: Any, case_version_id: str, repetition: int
                 compiled[loader_id].setdefault("_meta", {})["title"] = f"Benchmark Picture {slot}"
             filename = f"model_tests/{item['sha256']}{Path(item['path']).suffix.lower()}"
             compiled[loader_id]["inputs"][multi_reference["loader_input"]] = filename
-            conditioner_inputs[f"{multi_reference['input_prefix']}{slot - 1}"] = [loader_id, 0]
+            source_node_id = materialize_multi_reference_source(
+                compiled,
+                workflow,
+                multi_reference,
+                slot,
+                loader_id,
+                "benchmark",
+            )
+            conditioner_inputs[f"{multi_reference['input_prefix']}{slot - 1}"] = [source_node_id, 0]
             compiled_assets.append({
                 "asset_id": item["asset_id"], "role": item["role"], "sha256": item["sha256"],
                 "picture_index": slot,
                 "binding": {"node_id": loader_id, "input": multi_reference["loader_input"]},
             })
     else:
-        compiled_assets = [{"asset_id": item["asset_id"], "role": item["role"], "sha256": item["sha256"]} for item in linked]
+        role_order = {"reference_image": 0, "last_reference_image": 1}
+        for item in sorted(
+            linked,
+            key=lambda row: (role_order.get(str(row["role"]), 2), int(row["ordering"])),
+        ):
+            binding = bindings.get(str(item["role"]))
+            compiled_assets.append({
+                "asset_id": item["asset_id"],
+                "role": item["role"],
+                "sha256": item["sha256"],
+                **({"binding": binding} if binding else {}),
+            })
     return {
         "case_version_id": case_version_id,
         "status": "ready",
@@ -384,7 +650,16 @@ def compile_case(connection, session: Any, case_version_id: str, repetition: int
         "prompt_text": values["prompt"],
         "benchmark_contract": contract,
         "case_settings": case_settings,
-        "settings": {key: values[key] for key in ("seed", "width", "height", "fps", "duration_seconds", "frame_count")},
+        "settings": {
+            **{
+                key: values[key]
+                for key in (
+                    "seed", "width", "height", "fps", "duration_seconds",
+                    "frame_count",
+                )
+            },
+            "workflow_settings": normalized_workflow_settings,
+        },
         "assets": compiled_assets,
         "compiled_workflow": compiled,
     }

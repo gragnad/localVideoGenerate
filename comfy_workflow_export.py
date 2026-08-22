@@ -1,15 +1,8 @@
 from __future__ import annotations
 
-"""Static ComfyUI workflow (graph) to API prompt conversion helpers.
+"""Static ComfyUI graph-to-API prompt conversion helpers."""
 
-This module intentionally does not import or start ComfyUI.  The widget schema covers
-the bundled LTX 2.3 upscaler and MSR V2 workflows.
-"""
-
-import copy
 from typing import Any
-
-from workflow_builder import normalize_upscale_workflow_template
 
 
 WIDGET_SCHEMAS: dict[str, tuple[str, ...]] = {
@@ -20,18 +13,6 @@ WIDGET_SCHEMAS: dict[str, tuple[str, ...]] = {
     "CreateVideo": ("fps", "bit_depth"),
     "KSamplerSelect": ("sampler_name",),
     "LoraLoaderModelOnly": ("lora_name", "strength_model"),
-    "LTXAVTextEncoderLoader": ("text_encoder", "ckpt_name", "device"),
-    "LTXAddVideoICLoRAGuide": (
-        "frame_idx", "strength", "latent_downscale_factor", "crop",
-        "use_tiled_encode", "tile_size", "tile_overlap",
-    ),
-    "LTXICLoRALoaderModelOnly": ("lora_name", "strength_model"),
-    "LTXVAudioVAELoader": ("ckpt_name",),
-    "LTXVConditioning": ("frame_rate",),
-    "LTXVTiledVAEDecode": (
-        "horizontal_tiles", "vertical_tiles", "overlap", "last_frame_fix",
-        "working_device", "working_dtype",
-    ),
     "LoadVideo": ("file",),
     "ManualSigmas": ("sigmas",),
     "RandomNoise": ("noise_seed",),
@@ -39,20 +20,9 @@ WIDGET_SCHEMAS: dict[str, tuple[str, ...]] = {
     "SaveVideo": ("filename_prefix", "format", "codec"),
     "LoadImage": ("image",),
     "GetFrameByIndex": ("index",),
-    "PromptRelayEncode": ("global_prompt", "local_prompts", "segment_lengths", "epsilon"),
-    "LiconMSR": ("width", "height", "frame_count"),
     "INTConstant": ("value",),
     "FloatConstant": ("value",),
     "SimpleMath+": ("expression",),
-    "LTXVEmptyLatentAudio": ("frames_number", "frame_rate", "batch_size"),
-    "EmptyLTXVLatentVideo": ("width", "height", "length", "batch_size"),
-    "LowVRAMCheckpointLoader": ("ckpt_name",),
-    "LTX2_NAG": ("nag_scale", "nag_alpha", "nag_tau", "inplace"),
-    "LTXVAddGuideMulti": (
-        "num_guides",
-        "num_guides.frame_idx_1",
-        "num_guides.strength_1",
-    ),
 }
 
 FRONTEND_WIDGET_STATE_NODES = {"PreviewAny"}
@@ -97,7 +67,7 @@ def _resize_widgets(values: list[Any]) -> dict[str, Any]:
 
 
 def graph_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
-    """Convert an installed supported LTX graph without running ComfyUI."""
+    """Convert a supported ComfyUI graph without starting ComfyUI."""
     nodes = workflow.get("nodes")
     links = workflow.get("links")
     if not isinstance(nodes, list) or not isinstance(links, list):
@@ -170,19 +140,3 @@ def graph_to_api(workflow: dict[str, Any]) -> dict[str, Any]:
             "_meta": {"title": str(title)},
         }
     return output
-
-
-def mark_upscale_controls(prompt: dict[str, Any]) -> dict[str, Any]:
-    """Mark the stable controls patched by video-engine at job execution time."""
-    result = copy.deepcopy(prompt)
-    expected = {
-        "5007": ("ResizeImageMaskNode", "UPSCALE_TARGET_SIZE"),
-        "2483": ("CLIPTextEncode", "UPSCALE_POSITIVE_PROMPT"),
-    }
-    for node_id, (class_type, title) in expected.items():
-        node = result.get(node_id)
-        if not node or node.get("class_type") != class_type:
-            raise ValueError(f"공식 업스케일 워크플로 노드 {node_id} ({class_type})를 찾을 수 없습니다.")
-        node.setdefault("_meta", {})["title"] = title
-    normalize_upscale_workflow_template(result)
-    return result

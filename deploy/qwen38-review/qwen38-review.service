@@ -1,0 +1,15 @@
+[Unit]
+Description=Qwen3.8-27B visual review server
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/docker start -a qwen38-review-local
+ExecStop=/usr/bin/docker stop --timeout 300 qwen38-review-local
+Restart=no
+TimeoutStartSec=0
+TimeoutStopSec=360
+
+[Install]
+WantedBy=default.target

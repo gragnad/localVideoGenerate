@@ -1,0 +1,16 @@
+[Unit]
+Description=NAL Studio manual model-test AI review worker
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/nalstudio/local-ai/video-engine
+EnvironmentFile=%h/.config/h3-video-engine/runtime.env
+Environment=VIDEO_ENGINE_ROOT=/home/nalstudio/local-ai/video-engine
+ExecStart=/home/nalstudio/local-ai/video-engine/.venv/bin/python /home/nalstudio/local-ai/video-engine/model_test_review_worker.py
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

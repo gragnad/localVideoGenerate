@@ -7,10 +7,15 @@ import json
 from pathlib import Path
 from typing import Any
 
-import candidate_reviews
 from job_queue import now_iso
 import model_test_registry
-from model_test_reviews import SCORE_DIMENSIONS, effective_latest_reviews
+import model_test_r2v
+from model_test_reviews import (
+    I2V_SCORE_DIMENSIONS,
+    R2V_SCORE_DIMENSIONS,
+    SCORE_DIMENSIONS,
+    effective_latest_reviews,
+)
 
 CATEGORY_DIMENSIONS = {
     "prompt_detail_omission": "prompt_adherence",
@@ -25,6 +30,28 @@ CATEGORY_DIMENSIONS = {
     "scenario_comprehension": "narrative_causality",
     "other": None,
 }
+
+R2V_CATEGORY_DIMENSIONS = {
+    "prompt_detail_omission": "prompt_understanding",
+    "motion_physics": "interaction_contact",
+    "character_identity": "identity_consistency",
+    "scene_continuity": "visual_consistency",
+    "camera_direction": "camera_control",
+    "background_props": "prop_consistency",
+    "dialogue_audio": "audio_dialogue",
+    "visual_temporal_quality": "temporal_quality",
+    "vfx_effects": "visual_consistency",
+    "scenario_comprehension": "event_execution",
+    "other": None,
+}
+
+def _is_r2v_workflow(workflow: dict[str, Any] | None) -> bool:
+    return bool(
+        workflow
+        and model_test_r2v.is_r2v_workflow_filename(
+            str(workflow.get("workflow_filename") or "")
+        )
+    )
 
 
 def _json(value: Any) -> str:
@@ -61,6 +88,13 @@ def _selector(connection, model_id: str, workflow_profile_id: str | None):
 def analyze(root: Path, model_id: str, workflow_profile_id: str | None = None) -> dict[str, Any]:
     with model_test_registry.open_registry(root) as connection:
         model, workflow, condition, params = _selector(connection, model_id, workflow_profile_id)
+        is_r2v = _is_r2v_workflow(workflow)
+        dimension_catalog = (
+            R2V_SCORE_DIMENSIONS if is_r2v
+            else I2V_SCORE_DIMENSIONS if workflow
+            else SCORE_DIMENSIONS
+        )
+        category_dimensions = R2V_CATEGORY_DIMENSIONS if is_r2v else CATEGORY_DIMENSIONS
         runs = [
             dict(row)
             for row in connection.execute(
@@ -103,7 +137,7 @@ def analyze(root: Path, model_id: str, workflow_profile_id: str | None = None) -
                 )
             ]
         dimension_rows = []
-        for dimension, label in SCORE_DIMENSIONS.items():
+        for dimension, label in dimension_catalog.items():
             values = [float(row["score"]) for row in scores if row["dimension"] == dimension]
             dimension_rows.append({
                 "dimension": dimension,
@@ -118,7 +152,7 @@ def analyze(root: Path, model_id: str, workflow_profile_id: str | None = None) -
             group = issue_groups.setdefault(key, {
                 "category": key[0],
                 "subcategory": key[1],
-                "dimension": CATEGORY_DIMENSIONS.get(key[0]),
+                "dimension": category_dimensions.get(key[0]),
                 "count": 0,
                 "critical_count": 0,
                 "major_count": 0,
@@ -253,6 +287,7 @@ def analyze(root: Path, model_id: str, workflow_profile_id: str | None = None) -
         return {
             "model": model,
             "workflow": workflow,
+            "input_mode": "h3_r2v_multi_reference" if is_r2v else "general",
             "scope": {"model_id": model_id, "workflow_profile_id": workflow_profile_id},
             "summary": {
                 "run_count": len(runs),

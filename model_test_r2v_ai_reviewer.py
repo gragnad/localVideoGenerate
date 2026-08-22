@@ -3,19 +3,29 @@ from __future__ import annotations
 """General reference-aware Qwen3-Omni reviewer for R2V benchmarks."""
 
 import base64
+from io import BytesIO
 import json
 import mimetypes
+import os
 import re
 from pathlib import Path
 from typing import Any
 
-import candidate_reviews
+from PIL import Image
+
+import review_contract
 import model_test_ai_reviewer as common
 import vllm_reviewer as omni
 
 
-RUBRIC_VERSION = "r2v_general_reference_grounded_v5"
+RUBRIC_VERSION = "r2v_storyboard_action_flow_v7"
+R2V_REVIEW_IMAGE_MAX_DIMENSION = max(
+    512, int(os.environ.get("R2V_REVIEW_IMAGE_MAX_DIMENSION", "960"))
+)
 SCORE_KEYS = (
+    "storyboard_adherence", "panel_sequence_fidelity", "camera_path_transition",
+    "action_flow", "action_pacing",
+    "emotional_progression",
     "prompt_understanding", "reference_adherence", "reference_role_binding", "identity_consistency",
     "prop_consistency", "event_execution", "interaction_contact",
     "visual_consistency", "temporal_quality", "camera_control", "shot_structure", "style_fidelity",
@@ -23,16 +33,18 @@ SCORE_KEYS = (
 )
 
 SYSTEM_PROMPT = r"""
-You are a general reference-grounded evaluator for R2V video benchmarks.
+You are a storyboard-aware, reference-grounded evaluator for R2V video benchmarks.
 You receive the complete generated video, ordered visual references, a text execution prompt,
-role-limited reference contracts, text shot guidance when available, and a prompt-blind observation.
+role-limited reference contracts, storyboard panel contracts when available, and text shot guidance.
 
-Keep five questions separate:
-1. Reference adherence: did the output preserve only what each supplied visual reference defines?
-2. Prompt understanding: did the video interpret the requested scenario, relationships and ending?
-3. Action execution: did the required motion, causal order and physical contact occur?
-4. Visual consistency: did identities, props, environment, style and temporal rendering remain stable?
-5. Camera and shot structure: did the textual shot order, cuts, screen direction and camera behavior occur?
+Keep six questions separate. When a storyboard is supplied, question 1 is the primary decision axis:
+1. Storyboard adherence: did the video reproduce every ordered panel's action state, subject placement,
+   scale relationship, prop/effect state and emotional beat in the declared reading order?
+2. Reference adherence: did the output preserve only what each non-storyboard visual reference defines?
+3. Prompt understanding: did the video interpret the requested scenario, relationships and ending?
+4. Action execution: did the required motion, causal order and physical contact occur?
+5. Visual consistency: did identities, props, environment, style and temporal rendering remain stable?
+6. Camera and shot structure: did the shot boundaries support the storyboard rather than replace it?
 
 Reference discipline:
 - Evaluate every supplied visual reference exactly once and in Picture order.
@@ -40,12 +52,25 @@ Reference discipline:
 - Environment plates define geometry, landmarks, lighting language and action space only.
 - Prop and creature sheets define shape, material, anatomy, scale and ownership only as declared.
 - A reference sheet may contain several views of one design; do not count those views as duplicates.
+- A storyboard sheet is different from a character or prop sheet. Read its panels in the declared order
+  and compare each panel with the corresponding video interval. Do not treat its repeated characters as
+  duplicate scene instances.
+- For every storyboard panel, judge the complete checkpoint: composition, relative placement and scale,
+  pose and contact, prop/effect state, facial emotion, and the physical result that leads to the next panel.
+- Exact pixel copying is not required. Small framing drift is minor only when the panel's action state,
+  emotional beat, spatial relationship and transition remain clearly recognizable.
+- A missing, reordered or contradicted storyboard panel is a hard storyboard failure. Rendering the 2x2
+  grid, gutters, captions or simultaneous panel layout inside the video is also a hard failure.
+- Storyboard panels are checkpoints inside one continuous video, not four unrelated restarts. Verify that
+  contact force, motion vector, velocity, foot displacement and accumulated shield damage carry across cuts.
+- If a later shot re-establishes a held pose, repeats preparation, restores contact or resets damage instead
+  of continuing the prior shot's active motion, mark action_flow_status contradicted.
 - Never demand an unmentioned pose, action, camera move, background, or exact frame copy from a sheet.
 - Keep identity, environment, creature and prop roles separate. Do not transfer a trait between roles.
 - Use matched, minor_drift, major_mismatch, or uncertain. Uncertain is not a failure.
 
 Prompt, action and shot discipline:
-- The text execution prompt defines the scenario, required action, dialogue, shot sequence and camera plan.
+- The storyboard and text execution prompt jointly define the scenario, action checkpoints and shot order.
 - Evaluate each declared [Shot N] as a textual instruction. Verify shot count and order, cut timing/rhythm,
   viewpoint/framing, subject placement, requested camera motion, screen direction and ending state.
 - A missing or reordered required shot is a hard structural contradiction. Small timing, framing or camera
@@ -54,6 +79,8 @@ Prompt, action and shot discipline:
   requested. Do not infer successful contact from intent alone.
 - Judge spatial causality across cuts: subject identity, scale, screen direction, prop ownership and action
   state must carry over unless the prompt explicitly changes them.
+- Judge requested action pace separately. Unrequested slow motion, long static holds, or delayed preparation
+  that makes a fast action read as sluggish is a pacing contradiction; compact motion blur is not a defect.
 
 Genre calibration:
 - stylized_3d: judge designed proportions, silhouette, materials, readable contact and animation
@@ -77,10 +104,15 @@ Evidence and decision discipline:
   line order, lip sync and non-speakers' closed mouths. Do not infer a contradiction without audible
   or visible evidence; use uncertain when transcription or lips are not verifiable.
 - Evaluate every declared Subject role once. Keep identity, environment, creature and prop roles separate.
-- If the text prompt explicitly contains multiple [Shot N] instructions, a legacy rule that merely bans
+- If the text prompt explicitly contains multiple [Shot N] instructions, a generic rule that merely bans
   scene cuts is obsolete and must not be counted as a failure. Still report unintended or missing cuts
   through the structured shot-count/order and cut-timing checks.
 - Verify shot count/order, cut timing, screen direction and camera-plan adherence as separate checks.
+- When the prompt treats storyboard panels as camera waypoints, verify that the camera visibly travels or
+  uses the requested action-motivated occlusion toward the next panel composition; a direct reset at the
+  destination is not successful camera-path execution.
+- Keep Korean notes and evidence concise (each at most 240 characters) and return at most 8 highest-value issues.
+- Begin the JSON immediately. Do not emit analysis, reasoning, markdown or <think> tags.
 - Return one complete JSON object and no prose outside it.
 
 Schema:
@@ -91,6 +123,9 @@ Schema:
   "positive_note":"Korean factual strengths",
   "overall_note":"Korean evidence-based summary",
   "scores":{
+    "storyboard_adherence":0,"panel_sequence_fidelity":0,"camera_path_transition":0,
+    "action_flow":0,"action_pacing":0,
+    "emotional_progression":0,
     "prompt_understanding":0,"reference_adherence":0,"reference_role_binding":0,"identity_consistency":0,
     "prop_consistency":null,"event_execution":0,"interaction_contact":null,
     "visual_consistency":0,"temporal_quality":0,"camera_control":null,"shot_structure":0,"style_fidelity":0,
@@ -98,7 +133,11 @@ Schema:
   },
   "reference_checks":[
     {"picture_index":1,"role":"","status":"matched|minor_drift|major_mismatch|uncertain",
-     "evidence_ko":"","role_limit_ko":"","reference_kind":"visual_reference"}
+     "evidence_ko":"","role_limit_ko":"","reference_kind":"visual_reference|storyboard",
+     "panel_beat_checks":[
+       {"panel_index":1,"status":"verified|minor_drift|contradicted|uncertain|not_verifiable",
+        "evidence_ko":"","start_seconds":0.0,"end_seconds":0.0}
+     ]}
   ],
   "dialogue_checks":[
     {"speaker":"A","subject_index":1,"speaker_id":"S1","line_ko":"",
@@ -118,6 +157,9 @@ Schema:
     "cut_timing_status":"verified|minor_drift|contradicted|uncertain|not_verifiable",
     "screen_direction_status":"verified|minor_drift|contradicted|uncertain|not_verifiable",
     "camera_plan_status":"verified|minor_drift|contradicted|uncertain|not_verifiable",
+    "action_flow_status":"verified|minor_drift|contradicted|uncertain|not_verifiable",
+    "pacing_status":"verified|minor_drift|contradicted|uncertain|not_verifiable",
+    "storyboard_layout_leak":"absent|observed|uncertain|not_verifiable",
     "evidence_ko":""
   },
   "event_checks":[
@@ -146,35 +188,12 @@ def _is_storyboard_slot(item: dict[str, Any]) -> bool:
 
 
 def _visual_references(references: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [item for item in references if not _is_storyboard_slot(item)]
+    return list(references)
 
 
 def _general_review_prompt(prompt: str) -> str:
-    """Remove visual shot-board scaffolding while preserving textual shot actions."""
-    text = str(prompt or "")
-    text = re.sub(
-        r"The opening composition follows the 1st storyboard frame in <Picture \d+>\.\s*",
-        "", text, flags=re.IGNORECASE,
-    )
-    text = re.sub(
-        r"The cut follows the \d+(?:st|nd|rd|th) storyboard frame in <Picture \d+>;\s*",
-        "After the cut, ", text, flags=re.IGNORECASE,
-    )
-    replacements = {
-        "storyboard axis": "specified rotation axis",
-        "indicated by the storyboard": "specified in the text shot plan",
-        "final storyboard composition": "specified final composition",
-        "final storyboard position": "specified final position",
-        "storyboard origin": "specified origin point",
-        "ordered storyboard pose": "ordered pose plan",
-        "final storyboard frame": "specified final pose",
-    }
-    for source, target in replacements.items():
-        text = re.sub(re.escape(source), target, text, flags=re.IGNORECASE)
-    return "\n".join(
-        line for line in text.splitlines()
-        if "storyboard" not in line.lower() and "스토리보드" not in line
-    ).strip()
+    """Preserve storyboard instructions because they are part of the review evidence."""
+    return str(prompt or "").strip()
 
 
 def _expected_shot_count(prompt: str, shot_guidance: list[dict[str, Any]]) -> int:
@@ -188,6 +207,34 @@ def _expected_shot_count(prompt: str, shot_guidance: list[dict[str, Any]]) -> in
     return max(shot_numbers | guidance_numbers | {1})
 
 
+def _review_reference_data_url(path: Path) -> str:
+    """Encode a bounded review copy without modifying the source asset."""
+    raw = path.read_bytes()
+    mime = mimetypes.guess_type(path.name)[0] or "image/png"
+    try:
+        with Image.open(path) as source:
+            width, height = source.size
+            if max(width, height) <= R2V_REVIEW_IMAGE_MAX_DIMENSION:
+                encoded = raw
+            else:
+                image = source.copy()
+                image.thumbnail(
+                    (R2V_REVIEW_IMAGE_MAX_DIMENSION, R2V_REVIEW_IMAGE_MAX_DIMENSION),
+                    Image.Resampling.LANCZOS,
+                )
+                if image.mode not in {"RGB", "RGBA", "L", "LA", "P"}:
+                    image = image.convert("RGB")
+                buffer = BytesIO()
+                image.save(buffer, format="PNG", optimize=True)
+                encoded = buffer.getvalue()
+                mime = "image/png"
+    except (OSError, ValueError):
+        # Tests and legacy assets may not contain decodable image bytes. The
+        # downstream model remains the authority for whether media is valid.
+        encoded = raw
+    return f"data:{mime};base64,{base64.b64encode(encoded).decode('ascii')}"
+
+
 def _reference_media(request: dict[str, Any]) -> tuple[list[dict[str, str]], list[dict[str, Any]]]:
     contract = request.get("benchmark_contract") or {}
     slots = {
@@ -196,7 +243,6 @@ def _reference_media(request: dict[str, Any]) -> tuple[list[dict[str, str]], lis
         if (
             isinstance(item, dict)
             and int(item.get("picture_index") or 0) > 0
-            and not _is_storyboard_slot(item)
         )
     }
     media: list[dict[str, str]] = []
@@ -216,20 +262,31 @@ def _reference_media(request: dict[str, Any]) -> tuple[list[dict[str, str]], lis
         path = Path(str(asset.get("source_path") or ""))
         if not path.is_file():
             raise FileNotFoundError(f"R2V 검수 참조 이미지가 없습니다: {path}")
-        mime = mimetypes.guess_type(path.name)[0] or "image/png"
-        url = f"data:{mime};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+        url = _review_reference_data_url(path)
         label = str(slot.get("label_ko") or role)
         role_limit = str(slot.get("instruction_en") or "")
-        media_label = f"<Picture {index}> {label} · kind: visual_reference · role limit: {role_limit}"
+        reference_kind = (
+            "storyboard" if _is_storyboard_slot(slot) else "visual_reference"
+        )
+        media_label = f"<Picture {index}> {label} · kind: {reference_kind} · role limit: {role_limit}"
         media.append({"label": media_label, "url": url})
         descriptions.append({
             "picture_index": index,
             "role": role,
             "label_ko": label,
             "role_limit_en": role_limit,
-            "reference_kind": "visual_reference",
+            "reference_kind": reference_kind,
             "shared_asset_key": slot.get("shared_asset_key"),
             "sha256": asset.get("sha256"),
+            **(
+                {
+                    "storyboard_panel_count": int(slot.get("storyboard_panel_count") or 0),
+                    "storyboard_reading_order": str(slot.get("storyboard_reading_order") or ""),
+                    "storyboard_beats": list(slot.get("storyboard_beats") or []),
+                }
+                if reference_kind == "storyboard"
+                else {}
+            ),
         })
     if len(media) != len(slots):
         supplied = {item["picture_index"] for item in descriptions}
@@ -251,6 +308,40 @@ def _reference_checks(payload: dict[str, Any], references: list[dict[str, Any]])
         evidence = str(raw.get("evidence_ko") or "").strip()
         if status == "major_mismatch" and not evidence:
             status = "uncertain"
+        reference_kind = str(reference.get("reference_kind") or "visual_reference")
+        panel_checks = []
+        if reference_kind == "storyboard":
+            raw_panels = [
+                item for item in (raw.get("panel_beat_checks") or [])
+                if isinstance(item, dict)
+            ]
+            panel_count = int(reference.get("storyboard_panel_count") or 0)
+            panel_allowed = {
+                "verified", "minor_drift", "contradicted", "uncertain", "not_verifiable"
+            }
+            for panel_index in range(1, panel_count + 1):
+                raw_panel = next(
+                    (
+                        item for item in raw_panels
+                        if int(item.get("panel_index") or item.get("shot_index") or 0)
+                        == panel_index
+                    ),
+                    {},
+                )
+                panel_status = str(raw_panel.get("status") or "not_verifiable")
+                if panel_status not in panel_allowed:
+                    panel_status = "not_verifiable"
+                panel_evidence = str(raw_panel.get("evidence_ko") or "").strip()
+                if panel_status == "contradicted" and not panel_evidence:
+                    panel_status = "uncertain"
+                start, end = common._normalize_check_time(raw_panel, float(payload.get("duration_seconds") or 0))
+                panel_checks.append({
+                    "panel_index": panel_index,
+                    "status": panel_status,
+                    "evidence_ko": panel_evidence,
+                    "start_seconds": start,
+                    "end_seconds": end,
+                })
         result.append({
             "picture_index": index,
             "role": reference["role"],
@@ -258,7 +349,8 @@ def _reference_checks(payload: dict[str, Any], references: list[dict[str, Any]])
             "status": status,
             "evidence_ko": evidence,
             "role_limit_ko": str(raw.get("role_limit_ko") or reference["role_limit_en"]).strip(),
-            "reference_kind": "visual_reference",
+            "reference_kind": reference_kind,
+            **({"panel_beat_checks": panel_checks} if reference_kind == "storyboard" else {}),
         })
     return result
 
@@ -328,7 +420,7 @@ def _subject_binding_checks(payload: dict[str, Any], references: list[dict[str, 
     return result
 
 
-def _shot_structure_check(payload: dict[str, Any]) -> dict[str, Any]:
+def _shot_structure_check(payload: dict[str, Any], *, storyboard_present: bool = False) -> dict[str, Any]:
     raw = payload.get("shot_structure_check") if isinstance(payload.get("shot_structure_check"), dict) else {}
     allowed = {"verified", "minor_drift", "contradicted", "uncertain", "not_verifiable"}
     evidence = str(raw.get("evidence_ko") or "").strip()
@@ -336,6 +428,7 @@ def _shot_structure_check(payload: dict[str, Any]) -> dict[str, Any]:
     for key in (
         "shot_count_order_status", "cut_timing_status",
         "screen_direction_status", "camera_plan_status",
+        "action_flow_status", "pacing_status",
     ):
         status = str(raw.get(key) or "not_verifiable")
         if status not in allowed:
@@ -343,6 +436,13 @@ def _shot_structure_check(payload: dict[str, Any]) -> dict[str, Any]:
         if status == "contradicted" and not evidence:
             status = "uncertain"
         result[key] = status
+    if storyboard_present:
+        layout = str(raw.get("storyboard_layout_leak") or "not_verifiable")
+        if layout not in {"absent", "observed", "uncertain", "not_verifiable"}:
+            layout = "not_verifiable"
+        if layout == "observed" and not evidence:
+            layout = "uncertain"
+        result["storyboard_layout_leak"] = layout
     return result
 
 
@@ -364,6 +464,8 @@ def _normalize(
     expected_shot_count: int = 1,
 ) -> dict[str, Any]:
     references = _visual_references(references)
+    storyboard_references = [item for item in references if _is_storyboard_slot(item)]
+    subject_references = [item for item in references if not _is_storyboard_slot(item)]
     forbidden_failures, ignored_legacy_forbidden = _effective_forbidden_failures(
         forbidden_failures, expected_shot_count,
     )
@@ -372,8 +474,10 @@ def _normalize(
     payload = {**payload, "duration_seconds": duration}
     references_checked = _reference_checks(payload, references)
     dialogue_checked = _dialogue_checks(payload, list(dialogue or []), duration)
-    subject_bindings = _subject_binding_checks(payload, references)
-    shot_structure = _shot_structure_check(payload)
+    subject_bindings = _subject_binding_checks(payload, subject_references)
+    shot_structure = _shot_structure_check(
+        payload, storyboard_present=bool(storyboard_references)
+    )
     raw_scores = payload.get("scores") if isinstance(payload.get("scores"), dict) else {}
     scores: dict[str, float] = {}
     for key in SCORE_KEYS:
@@ -385,14 +489,14 @@ def _normalize(
             continue
 
     issues = []
-    for index, raw in enumerate((payload.get("issues") or [])[:candidate_reviews.MAX_ISSUES], 1):
+    for index, raw in enumerate((payload.get("issues") or [])[:review_contract.MAX_ISSUES], 1):
         if not isinstance(raw, dict):
             continue
         category = str(raw.get("category") or "other")
-        if category not in candidate_reviews.CATEGORIES:
+        if category not in review_contract.CATEGORIES:
             category = "other"
         severity = str(raw.get("severity") or "major")
-        if severity not in candidate_reviews.SEVERITIES:
+        if severity not in review_contract.SEVERITIES:
             severity = "major"
         start, end = common._normalize_check_time(raw, duration)
         issues.append({
@@ -415,6 +519,22 @@ def _normalize(
     uncertain_forbidden = [item for item in forbidden if item["status"] == "uncertain"]
     major_refs = [item for item in references_checked if item["status"] == "major_mismatch"]
     uncertain_refs = [item for item in references_checked if item["status"] == "uncertain"]
+    storyboard_panels = [
+        panel
+        for item in references_checked
+        if item.get("reference_kind") == "storyboard"
+        for panel in (item.get("panel_beat_checks") or [])
+    ]
+    storyboard_contradicted = [
+        item for item in storyboard_panels if item["status"] == "contradicted"
+    ]
+    storyboard_minor = [
+        item for item in storyboard_panels if item["status"] == "minor_drift"
+    ]
+    storyboard_uncertain = [
+        item for item in storyboard_panels
+        if item["status"] in {"uncertain", "not_verifiable"}
+    ]
     dialogue_hard_contradicted = [
         item for item in dialogue_checked
         if any(item[key] == "contradicted" for key in (
@@ -440,18 +560,27 @@ def _normalize(
     hard_shot_failure = bool(
         shot_structure["shot_count_order_status"] == "contradicted"
         or shot_structure["screen_direction_status"] == "contradicted"
+        or shot_structure["action_flow_status"] == "contradicted"
+        or storyboard_contradicted
+        or shot_structure.get("storyboard_layout_leak") == "observed"
     )
     soft_shot_failure = bool(
         shot_structure["cut_timing_status"] in {"minor_drift", "contradicted"}
         or shot_structure["camera_plan_status"] in {"minor_drift", "contradicted"}
         or shot_structure["shot_count_order_status"] == "minor_drift"
         or shot_structure["screen_direction_status"] == "minor_drift"
+        or shot_structure["action_flow_status"] == "minor_drift"
+        or shot_structure["pacing_status"] in {"minor_drift", "contradicted"}
+        or storyboard_minor
     )
     uncertain_shot = bool(
         any(shot_structure[key] in {"uncertain", "not_verifiable"} for key in (
             "shot_count_order_status", "cut_timing_status",
             "screen_direction_status", "camera_plan_status",
+            "action_flow_status", "pacing_status",
         ))
+        or storyboard_uncertain
+        or shot_structure.get("storyboard_layout_leak") in {"uncertain", "not_verifiable"}
     )
     critical = any(item["severity"] == "critical" for item in issues)
     major = any(item["severity"] == "major" for item in issues)
@@ -470,6 +599,7 @@ def _normalize(
     verdict = "reject" if hard_reject else ("acceptable" if gate_passed else "needs_improvement")
     summary = (
         f"참조 일치 {sum(x['status'] == 'matched' for x in references_checked)}/{len(references_checked)}"
+        f" · 스토리보드 패널 {sum(x['status'] == 'verified' for x in storyboard_panels)}/{len(storyboard_panels)}"
         f" · 필수 사건 확인 {sum(x['status'] == 'verified' for x in events)}/{len(events)}"
         f" · 사람 확인 {'필요' if human_review_required else '불필요'}"
     )
@@ -494,6 +624,13 @@ def _normalize(
             "reference_total": len(references_checked),
             "reference_major_mismatch": len(major_refs),
             "reference_uncertain": len(uncertain_refs),
+            "storyboard_panel_verified": sum(
+                x["status"] == "verified" for x in storyboard_panels
+            ),
+            "storyboard_panel_total": len(storyboard_panels),
+            "storyboard_panel_contradicted": len(storyboard_contradicted),
+            "storyboard_panel_minor_drift": len(storyboard_minor),
+            "storyboard_panel_uncertain": len(storyboard_uncertain),
             "dialogue_total": len(dialogue_checked),
             "dialogue_hard_contradicted": len(dialogue_hard_contradicted),
             "dialogue_soft_contradicted": len(dialogue_soft_contradicted),
@@ -517,7 +654,7 @@ def _normalize(
 
 
 def review_benchmark_video(
-    *, video_path: Path, request: dict[str, Any], batch_id: str, job_id: str,
+    *, video_path: Path, request: dict[str, Any], review_queue_id: str, job_id: str,
 ) -> dict[str, Any]:
     contract = request.get("benchmark_contract") or {}
     if str(contract.get("input_mode") or "") not in {
@@ -545,25 +682,13 @@ def review_benchmark_video(
         list(contract.get("forbidden_failures") or []), expected_shot_count,
     )
     model = omni._model_id()
-    observation = None
-    observation_raw = ""
-    if omni.VLLM_VIDEO_REVIEW_TWO_PASS:
-        observed, _message, observation_raw = omni._response_json(
-            model=model, system_prompt=omni.OBSERVATION_SYSTEM_PROMPT,
-            required_keys={"observed_summary_ko", "timeline", "audio_observation"},
-            user_text="Observe this complete R2V output without seeing its prompt or references.",
-            video_data_url=video_data_url, audio_data_url=audio_data_url,
-            video_metadata=video_metadata,
-        )
-        observation = omni._normalize_observation(
-            observed, duration_seconds=duration, audio_reviewed=use_audio,
-        )
     context = {
         "case_title": request.get("case_title"),
         "execution_prompt_en": execution_prompt,
         "intent_ko": request.get("review_intent_ko"),
         "visual_style": contract.get("visual_style"),
         "reference_contract": references,
+        "storyboard_review_contract": contract.get("storyboard_review_contract") or {},
         "required_events": contract.get("required_events") or [],
         "forbidden_failures": effective_forbidden,
         "text_shot_guidance": text_shot_guidance,
@@ -571,7 +696,6 @@ def review_benchmark_video(
         "dialogue": contract.get("dialogue") or [],
         "duration_seconds": duration,
         "audio_reviewed": use_audio,
-        "independent_observation": observation,
     }
     payload, _message, raw = omni._response_json(
         model=model, system_prompt=SYSTEM_PROMPT,
@@ -605,14 +729,14 @@ def review_benchmark_video(
         "forbidden_checks": review["forbidden_checks"],
         "enforcement": review["enforcement"],
         "model": model,
-        "review_mode": "qwen_omni_r2v_general_reference_grounded_v5",
+        "review_mode": "qwen_omni_r2v_storyboard_action_flow_v7",
         "rubric_version": RUBRIC_VERSION,
         "duration_seconds": round(duration, 3),
         "media_probe": probe,
         "reference_count": len(references),
-        "observation": observation,
-        "raw_observation_response": observation_raw,
+        "observation": None,
+        "raw_observation_response": "",
         "raw_response": raw,
-        "batch_id": batch_id,
+        "review_queue_id": review_queue_id,
         "job_id": job_id,
     }

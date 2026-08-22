@@ -7,7 +7,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
@@ -110,7 +110,10 @@ def list_jobs(jobs_root: Path, limit: int | None = None) -> list[dict[str, Any]]
     return [load_job(path) for path in directories]
 
 
-def find_next_queued_job(jobs_root: Path) -> Path | None:
+def find_next_queued_job(
+    jobs_root: Path,
+    request_filter: Callable[[dict[str, Any]], bool] | None = None,
+) -> Path | None:
     if not jobs_root.exists():
         return None
     candidates: list[Path] = []
@@ -119,6 +122,9 @@ def find_next_queued_job(jobs_root: Path) -> Path | None:
             continue
         status = read_json(status_path(job_dir), {}) or {}
         if status.get("status") == "queued":
+            request = read_json(request_path(job_dir), {}) or {}
+            if request_filter is not None and not request_filter(request):
+                continue
             candidates.append(job_dir)
     def queue_key(path: Path) -> tuple[str, int, str]:
         request = read_json(request_path(path), {}) or {}
@@ -132,10 +138,14 @@ def find_next_queued_job(jobs_root: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def claim_next_queued_job(jobs_root: Path, worker_pid: int) -> Path | None:
+def claim_next_queued_job(
+    jobs_root: Path,
+    worker_pid: int,
+    request_filter: Callable[[dict[str, Any]], bool] | None = None,
+) -> Path | None:
     """Atomically select and claim one queued job."""
     with queue_claim_lock(jobs_root):
-        job_dir = find_next_queued_job(jobs_root)
+        job_dir = find_next_queued_job(jobs_root, request_filter=request_filter)
         if job_dir is None:
             return None
         status = read_json(status_path(job_dir), {}) or {}

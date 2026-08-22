@@ -9,13 +9,63 @@ I2V suites.  Picture ordering is part of each immutable case contract.
 import hashlib
 import json
 import re
+from pathlib import Path
 from typing import Any
+
+import h3_prompt_projects
+import model_test_assets
 
 ACTION_SUITE_ID = "minimax_h3_r2v_action_stress_v1"
 ACTION_V2_SUITE_ID = "minimax_h3_r2v_action_stress_v2"
 TURN_SUITE_ID = "minimax_h3_r2v_turn_taking_v1"
-R2V_SUITE_IDS = frozenset({ACTION_SUITE_ID, ACTION_V2_SUITE_ID, TURN_SUITE_ID})
+DRAGON_SEASON_1_SUITE_ID = "raising_a_dragon_season01_h3_r2v_v1"
+DRAGON_SEASON_1_PROJECT_ID = "RaisingaDragonSeason01_H3_OFFICIAL"
+PROJECT_SUITE_PREFIX = "h3_project_r2v_"
+SCENE_SUITE_PREFIX = "h3_scene_r2v_"
+R2V_SUITE_IDS = frozenset({ACTION_SUITE_ID, ACTION_V2_SUITE_ID, TURN_SUITE_ID, DRAGON_SEASON_1_SUITE_ID})
 R2V_WORKFLOW_FILENAME = "(basic)video_minimax_h3_r2v_api.json"
+R2V_PINT8_WORKFLOW_FILENAME = "(basic)video_minimax_h3_r2v_pint8_api.json"
+R2V_UPDATE_ATTN_WORKFLOW_FILENAME = (
+    "(basic)video_minimax_h3_r2v_updateAttn_api.json"
+)
+R2V_DEFAULT_WORKFLOW_FILENAME = R2V_UPDATE_ATTN_WORKFLOW_FILENAME
+R2V_WORKFLOW_FILENAMES = frozenset({
+    R2V_WORKFLOW_FILENAME,
+    R2V_PINT8_WORKFLOW_FILENAME,
+    R2V_UPDATE_ATTN_WORKFLOW_FILENAME,
+})
+R2V_TEST_RESOLUTIONS = frozenset({
+    (608, 352), (736, 416), (832, 480), (1280, 736),
+})
+
+
+def project_suite_id(project_id: str) -> str:
+    """Return a stable R2V suite ID without changing the legacy Official suite."""
+    project_id = str(project_id or "").strip()
+    if project_id == DRAGON_SEASON_1_PROJECT_ID:
+        return DRAGON_SEASON_1_SUITE_ID
+    digest = hashlib.sha256(project_id.encode("utf-8")).hexdigest()[:20]
+    return f"{PROJECT_SUITE_PREFIX}{digest}"
+
+
+def project_scene_suite_id(project_id: str, scene_id: str) -> str:
+    """Return a stable suite ID for one selected scene in an H3 project."""
+    identity = f"{str(project_id or '').strip()}\0{str(scene_id or '').strip()}"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+    return f"{SCENE_SUITE_PREFIX}{digest}"
+
+
+def is_r2v_suite_id(suite_id: str) -> bool:
+    suite_id = str(suite_id or "")
+    return (
+        suite_id in R2V_SUITE_IDS
+        or suite_id.startswith(PROJECT_SUITE_PREFIX)
+        or suite_id.startswith(SCENE_SUITE_PREFIX)
+    )
+
+
+def is_r2v_workflow_filename(filename: str) -> bool:
+    return str(filename or "") in R2V_WORKFLOW_FILENAMES
 
 
 def _ref(label_ko: str, instruction_en: str) -> dict[str, str]:
@@ -403,6 +453,135 @@ VIDEO_SHOT_BEATS: dict[str, list[str]] = {
 }
 
 
+
+ACTION_V2_ENVIRONMENT_DESCRIPTIONS: dict[str, str] = {
+    "rs01": "the sunset-lit ruined stone terrace with a broad path, broken columns and a standing arch",
+    "rs02": "the elevated sunlit stone platform with a rectangular landing surface, open edges and distant mountains",
+    "rs03": "the vast ruined valley with cliff walls, monumental structures and a broad measurable ground plane",
+    "rs04": "the circular cracked stone battlefield with a central impact area and fractured paving",
+    "rs05": "the circular stone arena with one central mark and five surrounding floor markers",
+    "rs06": "the narrow crowded market lane with stalls, awnings and a continuous route into depth",
+    "rs07": "the dark circular chamber with a round floor motif, multiple entrances and an open retreat path",
+    "rs09": "the rain-soaked night causeway with reflective stone, distant towers, warm braziers and blue lightning",
+    "rs10": "the burning industrial corridor with wet central rails, fires on both sides, overhead smoke, collapsed beams, rubble and a distant illuminated archway",
+    "rs11": "the enclosed teal-lit chamber with a central walkway, reflective surfaces and a circular illuminated platform",
+    "rs12": "the intact arched stone hall with side alcoves, a continuous floor and one bright exit in the distance",
+    "rd01": "the ruined crossing space with opposing paths and a clear central intersection",
+    "rd02": "the long sunlit combat walkway with a straight axis, pale paving and colored lane markings",
+    "rd03": "the open live-action concrete terrace with an unobstructed throwing lane and distant green horizon",
+    "rd04": "the roofless ruined courtyard with a flat center and opposite threat directions",
+    "rd05": "the hand-drawn coastal promenade with parallel lanes, a stone wall and water",
+    "rd06": "the hand-drawn sunlit courtyard with a flat action area, broken walls and arched openings",
+    "rl01": "the sparse daylight room with a left window, central table and chairs and open doorways",
+    "rl02": "the narrow sunlit stone alley with strong shadows, a blue door and a clear depth axis",
+    "rl03": "the dark wet industrial set with a reflective floor and practical blue side lighting",
+    "ra01": "the painted interior with a wooden floor, left window, central door and right shelves",
+    "ra02": "the painted circular stone plaza with ruined arches, bright sky and distant coast",
+    "ra03": "the painted terrace with foreground foliage, a midground platform and distant sunset mountains",
+}
+
+ACTION_V2_VIDEO_SHOT_BEATS: dict[str, list[str]] = {
+    "rs01": [
+        "<Subject 1>, the long-dark-braided woman in the teal field jacket and ochre scarf from <Picture 1>, enters <Subject 2>, the sunset-lit ruined stone terrace from <Picture 2>, from screen left. She leans forward and accelerates into a full sprint toward screen right. Her boots maintain alternating ground contact as the camera tracks beside her, and the broken columns move consistently behind her.",
+        "The cut picks up her sprint mid-stride in a closer lateral tracking view without resetting her position or speed. The same long braid, teal jacket and ochre scarf remain visible as one fast spear-like projectile enters from screen right along a clear horizontal path. She sees it before contact, plants her left boot and makes one sharp lateral dodge toward the far side of the terrace. The projectile passes through the exact space she has just vacated.",
+        "Continuing directly from the dodge, she transfers her weight through the planted foot, regains balance and returns to full speed. The camera widens and gradually slows while she advances toward the standing arch. The same broken columns and stone path remain behind her in their original order as she exits through the far side of the terrace.",
+    ],
+    "rs02": [
+        "One continuous full-body wide shot follows the long-dark-braided protagonist along the platform. She takes exactly two accelerating steps, pushes from both feet, completes exactly one forward somersault around a horizontal pitch axis, lands with both boots together, bends her knees and hips to absorb impact and settles without a second rotation. The camera tracks gently without cutting or losing her hands or feet.",
+    ],
+    "rs03": [
+        "A very wide low-angle composition places the long-dark-braided human beside a doorway-sized structure while the basalt titan stands in the same valley. Its feet contact the ground near monumental architecture, proving an approximately one-hundred-to-one scale relationship.",
+        "The camera cranes upward and widens while retaining the tiny teal-jacketed protagonist and revealing the titan's monolithic arms, broken crown-like head and amber fissures against repeated architectural levels.",
+    ],
+    "rs04": [
+        "A high wide view places the long-dark-braided protagonist near the center of the cracked battlefield and the titan's monolithic hand directly above one visible contact area.",
+        "As the hand descends, she plants her left boot and performs one lateral dodge toward screen right before contact. The camera keeps her body and original contact area together.",
+        "The hand strikes the exact place she vacated. Dust and small fragments rise as she lands safely at screen right and steadies herself.",
+    ],
+    "rs05": [
+        "A high wide shot establishes one long-dark-braided protagonist on the central mark and five empty surrounding markers.",
+        "Exactly five separate obsidian-armored soldiers enter and stop with one complete body on each marker as the camera cranes slightly upward.",
+        "The five soldiers turn inward and hold a ring that clearly shows one central protagonist and exactly five distinct enemies.",
+    ],
+    "rs06": [
+        "One continuous forward tracking shot follows the long-dark-braided protagonist into the market lane. Separate crowd members progressively obscure her boots, torso and face, but the same long braid, teal jacket and ochre scarf remain intermittently visible along one uninterrupted path until she emerges with the same face, costume and direction.",
+    ],
+    "rs07": [
+        "A medium-wide shot establishes the long-dark-braided protector and ice-blue dragon hatchling separately in the circular chamber, with the threat at the left entrance and retreat toward screen right.",
+        "She places her left arm around the hatchling's chest and right arm behind its back, keeping both hands clear of the cyan wings, then turns her torso between the threat and hatchling.",
+        "Holding the same hatchling, she takes exactly two backward steps toward screen right while the camera tracks with both distinct bodies.",
+    ],
+    "rs08": [
+        "A medium-wide view establishes the protagonist holding the single ashwood spear with both hands while the obsidian-armored attacker faces her with one hooked blade.",
+        "She drives the same spear through one defensive arc from low left to high right as the attacker swings toward her. The camera follows the spear tip while both hand connections remain visible.",
+        "The spear tip and hooked blade meet at one clear contact point. The camera pushes in briefly and holds as the protagonist completes the block with the spear still in her possession.",
+    ],
+    "rs09": [
+        "One continuous static wide shot holds the long-dark-braided protagonist on the left and one dark armored enemy silhouette on the right across the wet causeway. Heavy rain falls coherently. A first blue lightning flash reveals the same face, costume and enemy outline; darkness returns without position changes, then a second flash illuminates the same towers, braziers and subjects.",
+    ],
+    "rs10": [
+        "A rear three-quarter wide shot follows the long-dark-braided protagonist from the foreground along the wet rails toward the distant archway while fires on both sides cast moving orange light.",
+        "A closer rear-side view stays on the same axis as smoke rises, rolls overhead and descends across her boots, torso and face. The same braid, teal jacket and scarf remain intermittently visible until she emerges.",
+        "A wider follow view shows fragments fall from a damaged overhead beam behind her and beside the rails only after she passes beneath it. The camera cranes upward as she continues toward the archway.",
+    ],
+    "rs11": [
+        "A wide view establishes the protagonist beside one indigo monster in the teal-lit chamber. A slight camera arc shows one armored core and exactly six turquoise-marked tentacles rooted to it.",
+        "Exactly one front tentacle launches across the walkway while the other five remain connected and she plants one foot toward the incoming path.",
+        "She makes one lateral dodge as the tentacle crosses her previous position and remains connected. The camera keeps her landing, attacking tentacle and unchanged core together.",
+    ],
+    "rs12": [
+        "A wide shot establishes the protagonist in the intact hall and the bright exit in depth. A crack begins near her left boot and spreads toward the left wall.",
+        "The left wall collapses only after the crack reaches it. Falling stones make her lose balance; she plants her right boot and recovers in place.",
+        "She turns and runs toward the bright arch along the open central floor while a rear tracking view retains the collapsed wall and original crack behind her.",
+    ],
+    "rd01": [
+        "One continuous high medium-wide shot holds the central intersection. Long-dark-braided Character A runs left to right while blond Character B runs right to left. A shifts to the far side and B to the near side at the center, they pass without contact, continue to clear separation and turn their heads back while their bodies remain oriented in the original directions.",
+    ],
+    "rd02": [
+        "A medium-wide view establishes Character A as sole owner of the ashwood spear while unarmed Character B faces her on the straight walkway.",
+        "Character A makes one thrust. Character B steps outside the tip and deflects the wooden shaft once with the left forearm at a visible contact point; the spear remains in A's hands.",
+        "Character B makes one right-leg counter-kick. Character A withdraws the same spear and takes one backward evasive step without changing ownership or screen direction.",
+    ],
+    "rd03": [
+        "A continuous live-action two-shot places Character A left and Character B right. A holds the red leather pouch by its brass ring, swings once and releases it left to right while the camera shows the full arc and both actors' hands.",
+        "Character B catches the same pouch once between both hands and raises it with the brass ring visible while Character A's hands remain empty.",
+    ],
+    "rd04": [
+        "A wide live-action shot establishes Character A and Character B back-to-back in the roofless courtyard, facing separate threats from the left and right openings as the camera makes a slow quarter orbit.",
+        "One staff strike enters left and A blocks once with crossed forearms while a separate low strike enters right and B evades with one backward lean. They keep back contact and finish facing opposite directions.",
+    ],
+    "rd05": [
+        "One continuous hand-drawn wide tracking shot follows the coastal promenade. Character A runs ahead near the wall while Character B pursues, accelerates into the water-side lane, draws level and passes completely ahead. The wall, water and lane markings continue in one stable direction.",
+    ],
+    "rd06": [
+        "A medium hand-drawn shot places Character A in front and Character B behind holding the single spear. A blocks one blade entering from screen left and says, <d>[Korean] 뒤로 물러서!</d> Only A's lips move and close.",
+        "Character B keeps the spear, replies, <d>[Korean] 이번엔 내가 막을게!</d> closes the mouth and steps toward screen right while A silently withdraws.",
+        "Character B drives the same spear forward in one counterattack. The camera pans with it while A stays behind and both 2D identities remain stable.",
+    ],
+    "rl01": [
+        "A realistic medium two-shot shows Character A holding the iron key in the right hand and Character B extending an empty left palm across the table.",
+        "A close-up shows A lower the long shaft into B's palm with the round bow and three asymmetrical teeth visible; A releases only as B's fingers close.",
+        "A medium two-shot shows A's empty hand withdrawn and B alone lifting the same key into the window light.",
+    ],
+    "rl02": [
+        "One continuous photorealistic front three-quarter tracking shot follows the long-dark-braided protagonist running from the alley depth toward the camera as it retreats. Her face, teal jacket and scarf remain readable while natural blur affects pumping limbs, nearby walls and background shadows; the blue door moves continuously behind her.",
+    ],
+    "rl03": [
+        "A realistic medium shot establishes the protagonist holding the inactive dark-steel device with both copper electrodes visible.",
+        "A contained blue arc ignites only between the electrodes as the camera pushes in on the device, complete hands and natural face.",
+        "The arc casts synchronized blue light across fingers, jacket, face, wet floor and wall while the camera eases back to reveal the reflections.",
+    ],
+    "ra01": [
+        "One continuous static hand-drawn medium shot shows the long-dark-braided protagonist front-facing. She turns her head right, rotates shoulders and torso, extends the right hand and settles into right profile while the braid, teal costume, face, line weight, flat colors and cel shadows remain stable.",
+    ],
+    "ra02": [
+        "One continuous static hand-drawn medium-wide shot shows the long-dark-braided teal fighter in the circular plaza with the single dark-blue sword, gold guard and red grip. She anticipates, makes one fast diagonal swing with one brief smear, resolves into a crisp stop pose and returns fully on-model without a cut.",
+    ],
+    "ra03": [
+        "One continuous hand-drawn wide shot places Character A and Character B on the midground terrace. The camera pans slowly left to right without cutting: foreground leaves move fastest, terrace and characters move moderately and distant mountains move slightly. B glances at A, then A returns one glance while line art and colors remain stable.",
+    ],
+}
+
 def _is_storyboard_reference(item: dict[str, str]) -> bool:
     return (
         "스토리보드" in str(item.get("label_ko") or "")
@@ -656,6 +835,23 @@ def _is_environment_reference(label: str) -> bool:
 def _subject_definition(case: dict[str, Any], subject_number: int, picture_index: int, item: dict[str, str]) -> str:
     label = str(item["label_ko"])
     role = str(item["instruction_en"]).strip().rstrip(".").removeprefix("defines ").removesuffix(" only")
+    if case.get("storyboard_free"):
+        short_id = str(case.get("short_id") or "")
+        if _is_environment_reference(label):
+            environment = ACTION_V2_ENVIRONMENT_DESCRIPTIONS.get(short_id)
+            if environment:
+                return f"<Subject {subject_number}> is {environment}, as shown in <Picture {picture_index}>."
+        if short_id == "ra02" and subject_number == 1:
+            subject = "a hand-drawn young woman with warm brown skin, a long dark side braid draped over one shoulder, a fitted teal jacket, an ochre scarf, charcoal trousers and brown boots"
+        elif "캐릭터 A" in label:
+            subject = "Character A, a young woman with warm brown skin, a long dark side braid draped over one shoulder, a fitted brick-red jacket, an ochre scarf, dark trousers and sturdy brown boots"
+        elif "캐릭터 B" in label:
+            subject = "Character B, a young man with light brown skin, short wavy blond hair, a cobalt-blue long coat, gray trousers, brown boots and one small silver ear cuff"
+        elif any(token in label for token in ("주인공", "인간 캐릭터", "보호자")):
+            subject = "the protagonist, a young woman with warm brown skin, a long dark side braid draped over one shoulder, a fitted teal field jacket, an ochre scarf, charcoal trousers and sturdy brown boots"
+        else:
+            subject = _reference_subject(label, case)
+        return f"<Subject {subject_number}> is {subject}, as shown in <Picture {picture_index}>; preserve {role}."
     if _is_environment_reference(label):
         return (
             f"<Subject {subject_number}> is the visible environment shown in <Picture {picture_index}>, "
@@ -749,6 +945,8 @@ def _video_shot_beats(case: dict[str, Any]) -> list[str]:
     short_id = str(case.get("short_id") or "")
     if short_id.startswith("rt"):
         return _dialogue_video_shot_beats(case)
+    if case.get("storyboard_free"):
+        return list(ACTION_V2_VIDEO_SHOT_BEATS.get(short_id) or [])
     return list(VIDEO_SHOT_BEATS.get(short_id) or [])
 
 
@@ -767,16 +965,8 @@ def _video_shots(case: dict[str, Any]) -> list[dict[str, str]]:
     picture_index = None if storyboard_free else _storyboard_picture_index(case)
     shots = []
     for index, beat in enumerate(beats, start=1):
-        if storyboard_free and index == 1:
-            composition = (
-                "A text-directed opening composition establishes the referenced subjects, environment, "
-                "action axis and pre-action state."
-            )
-        elif storyboard_free:
-            composition = (
-                "A direct cut changes to the specified composition; identity, scale, screen direction "
-                "and spatial continuity carry over from the preceding shot."
-            )
+        if storyboard_free:
+            composition = ""
         elif index == 1:
             composition = (
                 f"The opening composition follows the 1st storyboard frame in <Picture {picture_index}>."
@@ -786,21 +976,9 @@ def _video_shots(case: dict[str, Any]) -> list[dict[str, str]]:
                 f"The cut follows the {_ordinal(index)} storyboard frame in <Picture {picture_index}>; "
                 "identity, scale, screen direction and spatial continuity carry over from the preceding shot."
             )
-        if storyboard_free:
-            replacements = {
-                "storyboard axis": "specified rotation axis",
-                "indicated by the storyboard": "specified in this shot plan",
-                "final storyboard composition": "specified final composition",
-                "final storyboard position": "specified final position",
-                "storyboard origin": "specified origin point",
-                "ordered storyboard pose": "ordered pose plan",
-                "final storyboard frame": "specified final pose",
-            }
-            for source, target in replacements.items():
-                beat = beat.replace(source, target)
         shots.append({
             "at": "" if index == 1 else _shot_timestamp(case, index - 1, panel_count),
-            "description_en": f"{composition} {beat}",
+            "description_en": " ".join(part for part in (composition, beat) if part),
         })
     return shots
 
@@ -827,7 +1005,12 @@ def _explicit_video_shot_lines(case: dict[str, Any]) -> list[str]:
         subject_context = _natural_shot_subject_context(case, index, description)
         if index > 1:
             subject_context = subject_context[0].lower() + subject_context[1:]
-        parts = [prefix, subject_context, description]
+        parts = [prefix]
+        is_action_v2 = bool(case.get("storyboard_free"))
+        short_id = str(case.get("short_id") or "")
+        if not is_action_v2 or (index == 1 and short_id != "rs01"):
+            parts.append(subject_context)
+        parts.append(description)
         camera_cue = _shot_camera_cue(case, index, description)
         if camera_cue:
             parts.append(camera_cue)
@@ -840,6 +1023,10 @@ def _subject_narrative_descriptor(case: dict[str, Any], item: dict[str, str], la
     label = str(item["label_ko"])
     same = "the same " if later_shot else "a "
     if _is_environment_reference(label):
+        if case.get("storyboard_free"):
+            environment = ACTION_V2_ENVIRONMENT_DESCRIPTIONS.get(str(case.get("short_id") or ""))
+            if environment:
+                return "the same referenced environment" if later_shot else environment
         return (
             "the same environment and fixed landmarks"
             if later_shot else "the referenced environment with stable geometry and fixed landmarks"
@@ -874,13 +1061,19 @@ def _subject_narrative_descriptor(case: dict[str, Any], item: dict[str, str], la
     }
     match = re.search(r"캐릭터 ([A-F])(?: |$)", label)
     if match:
+        if case.get("storyboard_free") and match.group(1) == "A":
+            return "the same long-dark-braided woman in the brick-red jacket" if later_shot else "a long-dark-braided woman in a brick-red jacket and ochre scarf"
         first, later = character_anchors[match.group(1)]
         return later if later_shot else first
     if any(token in label for token in ("주인공", "인간 캐릭터", "보호자")):
+        if case.get("storyboard_free"):
+            return "the same teal-jacketed woman with a long dark side braid" if later_shot else "a long-dark-braided woman in a teal field jacket and ochre scarf"
         return (
             "the same teal-jacketed woman with a short dark braid"
             if later_shot else "a short-dark-braided woman in a teal field jacket and ochre scarf"
         )
+    if case.get("storyboard_free") and str(case.get("short_id") or "") == "ra02":
+        return "the same hand-drawn teal-jacketed woman with a long dark side braid" if later_shot else "a hand-drawn long-dark-braided woman in a teal jacket and ochre scarf"
     return "the same visually distinctive subject" if later_shot else "a visually distinctive subject with a stable silhouette, colors and materials"
 
 
@@ -1379,3 +1572,393 @@ def ensure_suites(connection) -> None:
                 "INSERT INTO suite_cases(suite_id,case_version_id,ordering,enabled) VALUES (?,?,?,1)",
                 (suite_id, cvid, ordering),
             )
+
+
+def _project_case_ids(project_id: str, clip_id: str) -> tuple[str, str]:
+    token = re.sub(r"[^a-z0-9]+", "_", str(clip_id or "").lower()).strip("_")
+    if project_id == DRAGON_SEASON_1_PROJECT_ID:
+        case_id = f"raising_dragon_s01_{token}"
+    else:
+        project_token = hashlib.sha256(str(project_id).encode("utf-8")).hexdigest()[:12]
+        case_id = f"h3_project_{project_token}_{token}"
+    return case_id, f"{case_id}_v1"
+
+
+def _project_reference_path(project_dir: Path, source_path: str) -> Path:
+    base = project_dir.resolve()
+    path = (base / str(source_path or "")).resolve()
+    if base not in path.parents or not path.is_file():
+        raise FileNotFoundError(f"H3 프로젝트 Picture를 찾을 수 없습니다: {source_path}")
+    return path
+
+
+def registered_project_targets(root: Path) -> list[dict[str, Any]]:
+    """Return the newest registration for each project/scope pair.
+
+    Schema 1 records predate scoped registrations and therefore continue to
+    mean the complete live project.  Schema 2 records pin suite membership to
+    the clip IDs captured when the user registered the test set.
+    """
+    targets: dict[tuple[str, str | None], tuple[tuple[str, str, str], dict[str, Any]]] = {}
+    base = root / "runtime/h3/project_test_sets"
+    if base.is_dir():
+        for path in base.glob("*/project_test_set.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if (
+                payload.get("deleted")
+                or payload.get("deleted_at")
+                or payload.get("status") == "deleted"
+            ):
+                continue
+            project_id = str(payload.get("project_id") or "").strip()
+            if not project_id:
+                continue
+            try:
+                schema_version = int(payload.get("schema_version") or 1)
+            except (TypeError, ValueError):
+                schema_version = 1
+            generation_mode = (
+                str(payload.get("generation_mode") or "r2v").strip().lower()
+                if schema_version >= 3
+                else "r2v"
+            )
+            if generation_mode != "r2v":
+                continue
+            scope = str(payload.get("scope") or "project") if schema_version >= 2 else "project"
+            scene_id = (
+                str(payload.get("scene_id") or "").strip() or None
+                if scope == "scene"
+                else None
+            )
+            clip_ids: list[str] | None = None
+            if schema_version >= 2:
+                raw_clip_ids = payload.get("clip_ids")
+                if not isinstance(raw_clip_ids, list):
+                    raw_clip_ids = [
+                        row.get("clip_id")
+                        for row in (payload.get("clips") or [])
+                        if isinstance(row, dict)
+                    ]
+                clip_ids = list(dict.fromkeys(
+                    str(value or "").strip()
+                    for value in raw_clip_ids
+                    if str(value or "").strip()
+                ))
+            target = {
+                "project_id": project_id,
+                "scene_id": scene_id,
+                "clip_ids": clip_ids,
+                "schema_version": schema_version,
+                "generation_mode": "r2v",
+                "project_test_set_id": str(payload.get("project_test_set_id") or path.parent.name),
+            }
+            rank = (
+                str(payload.get("created_at") or payload.get("updated_at") or ""),
+                str(payload.get("updated_at") or payload.get("created_at") or ""),
+                str(payload.get("project_test_set_id") or path.parent.name),
+            )
+            key = (project_id, scene_id)
+            current = targets.get(key)
+            if current is None or rank > current[0]:
+                targets[key] = (rank, target)
+    return [
+        targets[key][1]
+        for key in sorted(targets, key=lambda row: (row[0], row[1] or ""))
+    ]
+
+
+# Kept as a private compatibility alias for callers predating deletion support.
+_registered_project_targets = registered_project_targets
+
+
+def ensure_project_suite(
+    root: Path,
+    connection,
+    project_id: str,
+    scene_id: str | None = None,
+    clip_ids: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """Expose one authored H3 project as a project-specific R2V benchmark suite.
+
+    The canonical video prompt is copied byte-for-byte from each project clip,
+    while Picture assets are content-addressed into the evaluation asset store.
+    No generation job or H3 production queue item is created here.
+    """
+    project_id = str(project_id or "").strip()
+    scene_id = str(scene_id or "").strip() or None
+    suite_id = (
+        project_scene_suite_id(project_id, scene_id)
+        if scene_id
+        else project_suite_id(project_id)
+    )
+    project_dir = h3_prompt_projects.project_dir(root, project_id)
+    if not project_dir.is_dir():
+        return None
+    overview = h3_prompt_projects.project_clips(root, project_id)
+    clips = list(overview.get("clips") or [])
+    if scene_id:
+        clips = [
+            clip for clip in clips
+            if str(clip.get("scene_id") or "") == scene_id
+        ]
+    if clip_ids is not None:
+        clips_by_id = {
+            str(clip.get("clip_id") or ""): clip
+            for clip in clips
+        }
+        clips = [
+            clips_by_id[clip_id]
+            for clip_id in clip_ids
+            if clip_id in clips_by_id
+        ]
+    if not clips:
+        return None
+    project = next(
+        (row for row in h3_prompt_projects.list_projects(root).get("projects") or [] if row.get("project_id") == project_id),
+        {"title": project_id},
+    )
+    signature_rows = []
+    expected_links = 0
+    for clip in clips:
+        refs = []
+        for row in clip.get("references") or []:
+            asset_signature: dict[str, Any] = {
+                "picture_index": row.get("picture_index"),
+                "role": row.get("role"),
+                "label": row.get("label"),
+                "description": row.get("description"),
+                "source_path": row.get("source_path"),
+                "linked": row.get("linked"),
+            }
+            if row.get("linked"):
+                path = _project_reference_path(project_dir, str(row.get("source_path") or ""))
+                stat = path.stat()
+                asset_signature.update(size_bytes=stat.st_size, modified_ns=stat.st_mtime_ns)
+                expected_links += 1
+            refs.append(asset_signature)
+        signature_rows.append({
+            "scene_id": clip.get("scene_id"), "clip_id": clip.get("clip_id"),
+            "sequence": clip.get("sequence"), "duration_seconds": clip.get("duration_seconds"),
+            "video_prompt": clip.get("video_prompt"), "references": refs,
+        })
+    definition_sha = _sha({"suite_id": suite_id, "project_id": project_id, "clips": signature_rows})
+    current = connection.execute(
+        "SELECT definition_sha256 FROM benchmark_suites WHERE suite_id=?",
+        (suite_id,),
+    ).fetchone()
+    case_count = connection.execute(
+        "SELECT COUNT(*) count FROM suite_cases WHERE suite_id=? AND enabled=1",
+        (suite_id,),
+    ).fetchone()["count"] if current else 0
+    linked_count = connection.execute(
+        """SELECT COUNT(*) count FROM benchmark_case_assets a
+           JOIN suite_cases s ON s.case_version_id=a.case_version_id
+           WHERE s.suite_id=? AND s.enabled=1""",
+        (suite_id,),
+    ).fetchone()["count"] if current else 0
+    if current and current["definition_sha256"] == definition_sha and int(case_count) == len(clips) and int(linked_count) == expected_links:
+        connection.execute(
+            "UPDATE benchmark_suites SET active=1 WHERE suite_id=?",
+            (suite_id,),
+        )
+        return {
+            "suite_id": suite_id,
+            "project_id": project_id,
+            "scene_id": scene_id,
+            "case_count": len(clips),
+            "asset_count": expected_links,
+            "changed": False,
+        }
+
+    if scene_id:
+        name = f"{project.get('title') or project_id} · {scene_id} 씬 · {project_id}"
+    elif project_id == DRAGON_SEASON_1_PROJECT_ID:
+        name = "용 키우기 시즌 1 · 전체 씬·클립"
+    else:
+        name = f"{project.get('title') or project_id} · 전체 씬·클립 · {project_id}"
+    scene_count = len({str(clip.get("scene_id") or "") for clip in clips})
+    description = (
+        f"01 H3 생성 프로젝트의 {scene_id} 씬과 전체 클립을 "
+        "원본 프롬프트·Picture 구성 그대로 검증한다."
+        if scene_id
+        else f"01 H3 생성 프로젝트의 {scene_count}개 씬과 전체 클립을 원본 프롬프트·Picture 구성 그대로 검증한다."
+    )
+    connection.execute(
+        """INSERT INTO benchmark_suites
+           (suite_id,name,version,description,tier,definition_sha256,active)
+           VALUES (?,?,1,?,'project_validation',?,1)
+           ON CONFLICT(suite_id) DO UPDATE SET name=excluded.name,version=excluded.version,
+           description=excluded.description,tier=excluded.tier,
+           definition_sha256=excluded.definition_sha256,active=1""",
+        (suite_id, name, description, definition_sha),
+    )
+    connection.execute("DELETE FROM suite_cases WHERE suite_id=?", (suite_id,))
+    for ordering, clip in enumerate(clips, start=1):
+        case_id, case_version_id = _project_case_ids(project_id, str(clip["clip_id"]))
+        references = list(clip.get("references") or [])
+        reference_slots = [{
+            "picture_index": index,
+            "role": f"reference_image_{index}",
+            "label_ko": str(row.get("label") or row.get("role") or f"Picture {index}"),
+            "description_en": str(row.get("description") or ""),
+            "instruction_en": str(row.get("instruction_en") or ""),
+            "reference_kind": str(row.get("reference_kind") or "visual_reference"),
+            "source_project_path": str(row.get("source_path") or ""),
+            "image_generation_prompt": "",
+            **(
+                {
+                    "storyboard_panel_count": int(row.get("storyboard_panel_count") or 0),
+                    "storyboard_reading_order": str(row.get("storyboard_reading_order") or ""),
+                    "storyboard_beats": list(row.get("storyboard_beats") or []),
+                }
+                if str(row.get("reference_kind") or "") == "storyboard"
+                else {}
+            ),
+        } for index, row in enumerate(references, start=1)]
+        storyboard_review = dict(clip.get("storyboard_review_contract") or {})
+        storyboard_slots = [
+            row for row in reference_slots
+            if row.get("reference_kind") == "storyboard"
+        ]
+        storyboard_beats = [
+            beat
+            for slot in storyboard_slots
+            for beat in (slot.get("storyboard_beats") or [])
+            if isinstance(beat, dict)
+        ]
+        required_events = [
+            str(beat.get("required_state_ko") or beat.get("description_ko") or "").strip()
+            for beat in storyboard_beats
+            if str(beat.get("required_state_ko") or beat.get("description_ko") or "").strip()
+        ] or ["원본 H3 프롬프트의 사건 순서, 인물 역할과 종료 상태를 재현"]
+        forbidden_failures = [
+            str(value).strip()
+            for value in (storyboard_review.get("hard_failures") or [])
+            if str(value).strip()
+        ] or ["참조 캐릭터 정체성 변경", "배경·소품 불연속", "행동 순서 누락", "의도하지 않은 장면 전환"]
+        intent_ko = (
+            f"{clip['scene_id']}의 {clip['clip_id']} 클립을 프로젝트 원본 프롬프트와 참조 이미지로 재현한다. "
+            f"{str(clip.get('review_intent_ko') or '').strip()}"
+        ).strip()
+        contract = {
+            "input_mode": "h3_r2v_multi_reference",
+            "visual_style": "stylized_3d",
+            "source_project_id": project_id,
+            "source_scene_id": clip["scene_id"],
+            "source_clip_id": clip["clip_id"],
+            "reference_slots": reference_slots,
+            "shot_plan_source": (
+                "storyboard_reference_and_canonical_prompt"
+                if storyboard_slots else "canonical_prompt_text"
+            ),
+            "required_events": required_events,
+            "forbidden_failures": forbidden_failures,
+            "scoring_dimensions": (
+                ["storyboard_adherence", "panel_sequence_fidelity", "camera_path_transition", "action_flow", "action_pacing", "event_execution", "emotional_progression", "character_identity", "visual_temporal_quality"]
+                if storyboard_slots
+                else ["scenario_comprehension", "prompt_adherence", "motion_physics", "character_identity", "scene_continuity", "camera_direction", "visual_temporal_quality"]
+            ),
+            "storyboard_review_contract": storyboard_review,
+            "prompt_only_shot_guidance": [
+                {
+                    "shot_index": int(beat.get("panel_index") or index),
+                    "description_ko": str(beat.get("required_state_ko") or beat.get("description_ko") or ""),
+                }
+                for index, beat in enumerate(storyboard_beats, start=1)
+            ],
+            "generation": {"target_seconds": float(clip["duration_seconds"]), "fps": 24, "width": 832, "height": 480},
+            "parameters": {},
+            "dialogue": [],
+        }
+        title = f"{clip['clip_id']} · {project.get('title') or '용 키우기 시즌 1'}"
+        prompt = str(clip["video_prompt"])
+        definition = {"title": title, "intent_ko": intent_ko, "contract": contract, "prompt": prompt}
+        tags = ["minimax_h3", "r2v", "project_validation", project_id, str(clip["scene_id"])]
+        connection.execute(
+            """INSERT INTO benchmark_cases
+               (case_id,title,intent_ko,intent_json,category,tags_json,source_kind)
+               VALUES (?,?,?,?,? ,?,'h3_prompt_project')
+               ON CONFLICT(case_id) DO UPDATE SET title=excluded.title,intent_ko=excluded.intent_ko,
+               intent_json=excluded.intent_json,category=excluded.category,tags_json=excluded.tags_json""",
+            (case_id, title, intent_ko, _json(contract), "r2v_project_clip", _json(tags)),
+        )
+        connection.execute(
+            """INSERT INTO benchmark_case_versions
+               (case_version_id,case_id,version,title,intent_ko,category,tier,contract_json,definition_sha256)
+               VALUES (?,?,1,?,?,?,'project_validation',?,?)
+               ON CONFLICT(case_version_id) DO UPDATE SET title=excluded.title,intent_ko=excluded.intent_ko,
+               category=excluded.category,tier=excluded.tier,contract_json=excluded.contract_json,
+               definition_sha256=excluded.definition_sha256""",
+            (case_version_id, case_id, title, intent_ko, "r2v_project_clip", _json(contract), _sha(definition)),
+        )
+        connection.execute(
+            """INSERT OR REPLACE INTO benchmark_case_prompts
+               (case_version_id,language,prompt_kind,prompt_text,prompt_sha256)
+               VALUES (?,'en','canonical',?,?)""",
+            (case_version_id, prompt, hashlib.sha256(prompt.encode("utf-8")).hexdigest()),
+        )
+        connection.execute("DELETE FROM benchmark_case_assets WHERE case_version_id=?", (case_version_id,))
+        connection.execute("DELETE FROM benchmark_case_asset_requirements WHERE case_version_id=?", (case_version_id,))
+        for index, row in enumerate(references, start=1):
+            role = f"reference_image_{index}"
+            connection.execute(
+                """INSERT INTO benchmark_case_asset_requirements
+                   (case_version_id,role,kind,minimum_count,description)
+                   VALUES (?,?,'image',1,?)""",
+                (case_version_id, role, f"<Picture {index}> · {row.get('label') or row.get('role') or role}"),
+            )
+            if row.get("linked"):
+                asset_path = _project_reference_path(project_dir, str(row.get("source_path") or ""))
+                model_test_assets.save_and_link(root, connection, {
+                    "case_version_id": case_version_id,
+                    "role": role,
+                    "upload_path": str(asset_path),
+                    "original_name": asset_path.name,
+                })
+        connection.execute(
+            "INSERT INTO suite_cases(suite_id,case_version_id,ordering,enabled) VALUES (?,?,?,1)",
+            (suite_id, case_version_id, ordering),
+        )
+    connection.commit()
+    return {
+        "suite_id": suite_id,
+        "project_id": project_id,
+        "scene_id": scene_id,
+        "case_count": len(clips),
+        "asset_count": expected_links,
+        "changed": True,
+    }
+
+
+def ensure_dragon_season_1_suite(root: Path, connection) -> dict[str, Any] | None:
+    """Keep the original Official project suite and its IDs backward compatible."""
+    return ensure_project_suite(root, connection, DRAGON_SEASON_1_PROJECT_ID)
+
+
+def ensure_registered_project_suites(root: Path, connection) -> list[dict[str, Any]]:
+    """Synchronize project-wide and scene-scoped H3 test registrations."""
+    connection.execute(
+        "UPDATE benchmark_suites SET active=0 "
+        "WHERE suite_id GLOB ? OR suite_id GLOB ?",
+        (f"{PROJECT_SUITE_PREFIX}*", f"{SCENE_SUITE_PREFIX}*"),
+    )
+    results = []
+    for target in registered_project_targets(root):
+        project_id = str(target["project_id"])
+        scene_id = target.get("scene_id")
+        if project_id == DRAGON_SEASON_1_PROJECT_ID and scene_id is None:
+            continue
+        result = ensure_project_suite(
+            root,
+            connection,
+            project_id,
+            scene_id,
+            target.get("clip_ids"),
+        )
+        if result:
+            result["project_test_set_id"] = target["project_test_set_id"]
+            results.append(result)
+    return results

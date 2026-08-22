@@ -52,7 +52,7 @@ class ModelTestRegistryTest(unittest.TestCase):
 
     def test_default_suite_is_versioned_and_model_neutral(self):
         dashboard = model_test_registry.dashboard(self.root, self.workflows)
-        self.assertEqual(dashboard["schema_version"], 8)
+        self.assertEqual(dashboard["schema_version"], 10)
         self.assertEqual(len(dashboard["suites"]), 5)
         generic = next(item for item in dashboard["suites"] if item["suite_id"] == model_test_registry.DEFAULT_SUITE_ID)
         cases = generic["cases"]
@@ -123,9 +123,9 @@ class ModelTestRegistryTest(unittest.TestCase):
                 **base, "resolution": {"width": 768, "height": 432},
             })
         result = model_test_registry.create_session(self.root, {
-            **base, "resolution": {"width": 832, "height": 480},
+            **base, "resolution": {"width": 608, "height": 352},
         })
-        self.assertEqual(result["resolution"], {"width": 832, "height": 480})
+        self.assertEqual(result["resolution"], {"width": 608, "height": 352})
 
     def test_session_plans_every_case_without_starting_generation(self):
         model_id = self.register_model()
@@ -169,6 +169,32 @@ class ModelTestRegistryTest(unittest.TestCase):
         self.assertTrue(repeated["already_deleted"])
         self.assertEqual(repeated["deleted_run_count"], 0)
 
+    def test_orphaned_ai_review_status_does_not_block_session_delete(self):
+        model_id = self.register_model()
+        profile_id = self.register_workflow(model_id)["workflow_profile_id"]
+        adapter_id = self.register_adapter(profile_id)
+        session_id = model_test_registry.create_session(self.root, {
+            "model_id": model_id,
+            "workflow_profile_id": profile_id,
+            "adapter_id": adapter_id,
+            "suite_id": model_test_registry.DEFAULT_SUITE_ID,
+        })["session_id"]
+        with model_test_registry.open_registry(self.root) as connection:
+            connection.execute(
+                "UPDATE test_sessions SET status='ai_review_queued' WHERE session_id=?",
+                (session_id,),
+            )
+            connection.commit()
+
+        deleted = model_test_registry.delete_session(self.root, session_id)
+        self.assertEqual(session_id, deleted["session_id"])
+        self.assertEqual(0, deleted["deleted_review_queue_count"])
+        with model_test_registry.open_registry(self.root) as connection:
+            self.assertIsNone(connection.execute(
+                "SELECT 1 FROM test_sessions WHERE session_id=?",
+                (session_id,),
+            ).fetchone())
+
     def test_workflow_cannot_be_attached_to_another_model(self):
         first = self.register_model("First")
         second = model_test_registry.register_model(self.root, {
@@ -195,6 +221,28 @@ class ModelTestRegistryTest(unittest.TestCase):
                 "workflow_filename": "../official.json",
                 "name": "Bad",
             })
+
+    def test_ltx_is_review_history_only_and_hidden_from_new_workflows(self):
+        (self.workflows / "(basic)video_ltx2_3_i2v_api.json").write_text(
+            json.dumps({"1": {"class_type": "CLIPTextEncode", "inputs": {"text": ""}}}),
+            encoding="utf-8",
+        )
+        available = model_test_registry.available_workflows(self.workflows)
+        self.assertEqual(["official.json"], [row["filename"] for row in available])
+        with self.assertRaisesRegex(ValueError, "열람 전용"):
+            model_test_registry.register_model(self.root, {
+                "provider": "Lightricks", "family": "LTX 2.3",
+                "display_name": "LTX 2.3 Basic", "version": "2.3",
+            })
+        with model_test_registry.open_registry(self.root) as connection:
+            connection.execute(
+                """INSERT INTO models(
+                       model_id,provider,family,display_name,version,modality,capabilities_json
+                   ) VALUES ('legacy_ltx','Lightricks','LTX 2.3','LTX reviewed','2.3','video','{}')"""
+            )
+        dashboard = model_test_registry.dashboard(self.root, self.workflows)
+        legacy = next(row for row in dashboard["models"] if row["model_id"] == "legacy_ltx")
+        self.assertTrue(legacy["legacy_read_only"])
 
 
 class ModelTestUITest(unittest.TestCase):
@@ -233,8 +281,8 @@ class ModelTestUITest(unittest.TestCase):
         self.assertIn('/ai-review', server)
         self.assertIn('modelTestAiReviewStatus', app)
         self.assertIn('model-test-ai-progress', app)
-        self.assertIn("['job','batch'].includes(detail.resource)", app)
-        self.assertIn('manifest.benchmark_ai_review?.reviewed_at', server)
+        self.assertNotIn("['job','batch'].includes(detail.resource)", app)
+        self.assertIn("kind: 'model_review_queue'", server)
         self.assertNotIn('navigator.clipboard.writeText(prompt.prompt_text)', app)
         self.assertIn('modelTestSubcategoryOptions', app)
         self.assertIn('data-model-test-field="subcategory"', app)
@@ -250,6 +298,12 @@ class ModelTestUITest(unittest.TestCase):
         self.assertIn("/api/model-tests/r2v/shared-assets/", app)
         self.assertIn("save_r2v_shared_asset", server)
         self.assertIn("unlink_r2v_shared_asset", server)
+        self.assertIn("activeModelTestModels", app)
+        self.assertIn("item.legacy_read_only!==true", app)
+        adapter_source = (root / "workflow_adapter.py").read_text(encoding="utf-8")
+        self.assertNotIn("TextGenerateLTX2Prompt", adapter_source)
+        self.assertNotIn("LiconMSR", adapter_source)
+        self.assertNotIn("LTXVEmptyLatentAudio", adapter_source)
 
 
 if __name__ == "__main__":

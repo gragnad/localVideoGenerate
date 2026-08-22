@@ -17,8 +17,13 @@ VLLM_REVIEW_MAX_TOKENS = int(os.environ.get("VLLM_REVIEW_MAX_TOKENS", "5000"))
 VLLM_REVIEW_TEMPERATURE = float(
     os.environ.get("VLLM_REVIEW_TEMPERATURE", "0.1")
 )
-VLLM_VIDEO_REVIEW_TWO_PASS = (
-    os.environ.get("VLLM_VIDEO_REVIEW_TWO_PASS", "true")
+VLLM_REVIEW_TOP_P = float(os.environ.get("VLLM_REVIEW_TOP_P", "0.95"))
+VLLM_REVIEW_TOP_K = int(os.environ.get("VLLM_REVIEW_TOP_K", "20"))
+VLLM_REVIEW_REASONING_EFFORT = os.environ.get(
+    "VLLM_REVIEW_REASONING_EFFORT", ""
+).strip()
+VLLM_REVIEW_ENABLE_THINKING = (
+    os.environ.get("VLLM_REVIEW_ENABLE_THINKING", "true")
     .strip()
     .lower()
     not in {"0", "false", "no", "off"}
@@ -27,6 +32,12 @@ VLLM_REVIEW_USE_AUDIO_IN_VIDEO = (
     os.environ.get("VLLM_REVIEW_USE_AUDIO_IN_VIDEO", "auto")
     .strip()
     .lower()
+)
+VLLM_REVIEW_AUDIO_CAPABLE = (
+    os.environ.get("VLLM_REVIEW_AUDIO_CAPABLE", "true")
+    .strip()
+    .lower()
+    not in {"0", "false", "no", "off"}
 )
 VLLM_REVIEW_STORE_RAW_MESSAGE = (
     os.environ.get("VLLM_REVIEW_STORE_RAW_MESSAGE", "false")
@@ -48,6 +59,27 @@ VLLM_REVIEW_PROXY_FPS = max(
 VLLM_REVIEW_PROXY_MAX_WIDTH = max(
     320,
     int(os.environ.get("VLLM_REVIEW_PROXY_MAX_WIDTH", "768")),
+)
+VLLM_REVIEW_VIDEO_PROXY_MODE = os.environ.get(
+    "VLLM_REVIEW_VIDEO_PROXY_MODE", "mjpeg_avi"
+).strip().lower()
+
+
+def _json_object_env(name: str) -> dict[str, Any]:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{name} JSON 설정을 해석할 수 없습니다: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{name} 설정은 JSON 객체여야 합니다.")
+    return payload
+
+
+VLLM_REVIEW_MM_PROCESSOR_KWARGS = _json_object_env(
+    "VLLM_REVIEW_MM_PROCESSOR_KWARGS"
 )
 
 
@@ -117,135 +149,6 @@ Schema:
 """.strip()
 
 
-COMPLIANCE_SYSTEM_PROMPT = r"""
-You are the second-pass quality-control reviewer for an AI-generated cinematic
-video production pipeline.
-
-You receive:
-1. the original generation instructions,
-2. the complete generated source video with its original motion and available audio,
-3. an independent first-pass observation that was produced without seeing the
-   generation instructions,
-4. timing and media metadata.
-
-Compare the required production behavior against actual video evidence.
-
-Evidence discipline:
-- Do not treat the original prompt as proof that an event occurred.
-- Prefer direct source-video evidence over the observation when they conflict.
-- Do not turn "maybe", "appears", or an ambiguous dark shape into a verified fact.
-- Distinguish verified, contradicted, uncertain, and not_verifiable requirements.
-- Do not claim exact dialogue accuracy unless audio was reviewed and intelligible.
-- Visible lip motion alone does not prove exact spoken words.
-- Use narrow time ranges for localized events.
-- Do not mark an entity missing for the entire clip when it is required only during
-  an early, middle, or late interval.
-- Evaluate each requirement once and avoid duplicate issues.
-
-Review priorities:
-- required visible characters, creatures, threats, objects, and prohibited extras,
-- character identity and continuity,
-- chronological action order, sustained motion, one-time events, contact or miss,
-- start state and end state,
-- camera movement and shot transition,
-- deformation, duplicated limbs, merged bodies, broken props, flicker,
-- unintended readable text, logos, watermarks, subtitles, or UI,
-- dialogue/audio only when audio evidence is available.
-
-Mandatory motion-quality audit:
-- Check pose-to-pose continuity, limb and body articulation, direction and speed,
-  contact physics, object permanence, cause-and-effect reactions, and whether each
-  prompted action actually begins, develops, and ends coherently.
-- Treat sudden unmotivated movement, teleporting, sliding, rubber-like deformation,
-  direction reversal, frozen motion followed by a jump, or an impossible collision
-  as a concrete issue with a narrow timestamp.
-- Include at least one requirement_check in action or continuity and at least one
-  requirement_check in artifact, even when both pass.
-
-Severity:
-- blocking: makes the shot unusable or directly contradicts a required core beat.
-- major: clearly harms continuity or readability.
-- minor: cosmetic issue that should not trigger an automatic retake by itself.
-- advisory: uncertain or preference-based observation.
-
-Return exactly one JSON object and no prose outside JSON.
-
-Schema:
-{
-  "accepted": true,
-  "confidence": 0.0,
-  "summary_ko": "Korean summary",
-  "requirement_checks": [
-    {
-      "requirement_ko": "requirement being checked",
-      "category": "character|entity|action|timing|camera|dialogue|audio|continuity|artifact|other",
-      "status": "verified|contradicted|uncertain|not_verifiable",
-      "start_seconds": 0.0,
-      "end_seconds": 0.0,
-      "evidence_ko": "direct evidence"
-    }
-  ],
-  "issues": [
-    {
-      "severity": "blocking|major|minor|advisory",
-      "type": "character_continuity|action_mismatch|temporal_mismatch|camera_mismatch|deformation|extra_character|missing_entity|dialogue_mismatch|audio_mismatch|text_artifact|lighting_continuity|other",
-      "sample_indices": [],
-      "start_seconds": 0.0,
-      "end_seconds": 0.0,
-      "evidence_ko": "Korean direct evidence",
-      "recommended_workflow": "retake|manual_review|none",
-      "retake_prompt_en": "English correction prompt with temporal behavior",
-      "retake_strength": 1.0
-    }
-  ],
-  "recommended_action": "accept|retake|manual_review"
-}
-
-Decision rules:
-- accepted must be false if any blocking or major issue exists.
-- recommended_action is retake only when a localized correction is plausible.
-- use manual_review when a required core behavior remains uncertain.
-- start_seconds and end_seconds must fit the supplied duration.
-- sample_indices remains an empty list in direct-video mode.
-- a passing decision must be based on observed evidence, not prompt repetition.
-- Keep reasoning concise. Return at most 12 requirement_checks and 8 issues.
-- The final JSON must be complete; never stop in the middle of an array or object.
-- finish with the JSON object in assistant content; do not leave the final answer
-  only in reasoning or reasoning_content.
-""".strip()
-
-
-ONE_PASS_SYSTEM_PROMPT = r"""
-You are the automated quality-control reviewer for a short AI-generated cinematic
-video supplied as the complete source MP4. Review its motion, timing, visual
-continuity, and available audio against the supplied generation instructions.
-
-Judge actual chronological video evidence, not prompt wording. Do not infer exact
-dialogue from lip motion. Use narrow timestamps. Separate ambiguity from failure.
-Do not duplicate issues.
-
-Return exactly one JSON object with this schema:
-{
-  "accepted": true,
-  "confidence": 0.0,
-  "summary_ko": "Korean summary",
-  "requirement_checks": [],
-  "issues": [
-    {
-      "severity": "blocking|major|minor|advisory",
-      "type": "character_continuity|action_mismatch|temporal_mismatch|camera_mismatch|deformation|extra_character|missing_entity|dialogue_mismatch|audio_mismatch|text_artifact|lighting_continuity|other",
-      "sample_indices": [],
-      "start_seconds": 0.0,
-      "end_seconds": 0.0,
-      "evidence_ko": "Korean evidence",
-      "recommended_workflow": "retake|manual_review|none",
-      "retake_prompt_en": "English correction with temporal behavior",
-      "retake_strength": 1.0
-    }
-  ],
-  "recommended_action": "accept|retake|manual_review"
-}
-""".strip()
 
 
 class VLLMReviewError(RuntimeError):
@@ -403,6 +306,8 @@ def probe_video(path: Path) -> dict[str, Any]:
 
 
 def _should_use_audio(media_probe: dict[str, Any]) -> bool:
+    if not VLLM_REVIEW_AUDIO_CAPABLE:
+        return False
     if VLLM_REVIEW_USE_AUDIO_IN_VIDEO in {"1", "true", "yes", "on"}:
         return bool(media_probe.get("has_audio"))
     if VLLM_REVIEW_USE_AUDIO_IN_VIDEO in {"0", "false", "no", "off"}:
@@ -411,6 +316,13 @@ def _should_use_audio(media_probe: dict[str, Any]) -> bool:
 
 
 def _prepare_review_video(video_path: Path) -> Path:
+    if VLLM_REVIEW_VIDEO_PROXY_MODE in {"source", "original", "none"}:
+        return video_path
+    if VLLM_REVIEW_VIDEO_PROXY_MODE != "mjpeg_avi":
+        raise VLLMReviewError(
+            "지원하지 않는 영상 프록시 모드입니다: "
+            f"{VLLM_REVIEW_VIDEO_PROXY_MODE}"
+        )
     review_path = video_path.with_name(
         f"review_source_video_mjpeg_{VLLM_REVIEW_PROXY_FPS}fps_"
         f"{VLLM_REVIEW_PROXY_MAX_WIDTH}w.avi"
@@ -478,19 +390,27 @@ def _direct_video_data_url(video_path: Path) -> tuple[str, dict[str, Any]]:
         )
 
     encoded = base64.b64encode(review_path.read_bytes()).decode("ascii")
+    using_source = review_path.resolve() == video_path.resolve()
+    suffix = review_path.suffix.lower()
+    mime_type = {
+        ".mp4": "video/mp4",
+        ".mov": "video/quicktime",
+        ".webm": "video/webm",
+        ".avi": "video/x-msvideo",
+    }.get(suffix, "application/octet-stream")
     return (
-        f"data:video/x-msvideo;base64,{encoded}",
+        f"data:{mime_type};base64,{encoded}",
         {
             "transport": VLLM_REVIEW_VIDEO_TRANSPORT,
-            "mime_type": "video/x-msvideo",
+            "mime_type": mime_type,
             "source_path": str(video_path),
             "source_size_bytes": video_path.stat().st_size,
             "review_video_path": str(review_path),
             "review_video_size_bytes": size_bytes,
             "encoded_size_bytes": len(encoded),
-            "review_codec": "mjpeg",
-            "review_fps": VLLM_REVIEW_PROXY_FPS,
-            "review_max_width": VLLM_REVIEW_PROXY_MAX_WIDTH,
+            "review_codec": "source" if using_source else "mjpeg",
+            "review_fps": None if using_source else VLLM_REVIEW_PROXY_FPS,
+            "review_max_width": None if using_source else VLLM_REVIEW_PROXY_MAX_WIDTH,
             "complete_source_video": True,
             "complete_timeline": True,
         },
@@ -608,10 +528,9 @@ def _response_json(
     payload: dict[str, Any] = {
         "model": model,
         "temperature": VLLM_REVIEW_TEMPERATURE,
+        "top_p": VLLM_REVIEW_TOP_P,
+        "top_k": VLLM_REVIEW_TOP_K,
         "max_tokens": VLLM_REVIEW_MAX_TOKENS,
-        "mm_processor_kwargs": {
-            "use_audio_in_video": False,
-        },
         "response_format": {"type": "json_object"},
         "messages": [
             {
@@ -624,7 +543,14 @@ def _response_json(
             },
         ],
     }
-
+    if VLLM_REVIEW_MM_PROCESSOR_KWARGS:
+        payload["mm_processor_kwargs"] = VLLM_REVIEW_MM_PROCESSOR_KWARGS
+    payload["chat_template_kwargs"] = {
+        "enable_thinking": VLLM_REVIEW_ENABLE_THINKING,
+        "preserve_thinking": False,
+    }
+    if VLLM_REVIEW_REASONING_EFFORT:
+        payload["reasoning_effort"] = VLLM_REVIEW_REASONING_EFFORT
     response = requests.post(
         f"{VLLM_URL}/v1/chat/completions",
         json=payload,
@@ -636,6 +562,25 @@ def _response_json(
         response = requests.post(
             f"{VLLM_URL}/v1/chat/completions",
             json=fallback_payload,
+            timeout=VLLM_REVIEW_TIMEOUT,
+        )
+    if response.status_code == 400:
+        # OpenAI-compatible servers expose different optional generation and
+        # multimodal fields. Keep the full Qwen profile first, then make one
+        # conservative compatibility retry without changing the messages or
+        # the video input itself.
+        compatibility_payload = dict(payload)
+        for optional_key in (
+            "response_format",
+            "top_k",
+            "mm_processor_kwargs",
+            "chat_template_kwargs",
+            "reasoning_effort",
+        ):
+            compatibility_payload.pop(optional_key, None)
+        response = requests.post(
+            f"{VLLM_URL}/v1/chat/completions",
+            json=compatibility_payload,
             timeout=VLLM_REVIEW_TIMEOUT,
         )
     if not response.ok:
@@ -798,431 +743,3 @@ def _normalize_observation(
             if str(item).strip()
         ],
     }
-
-
-def _normalize_report(
-    payload: dict[str, Any],
-    *,
-    duration_seconds: float,
-) -> dict[str, Any]:
-    checks = []
-    allowed_check_status = {
-        "verified",
-        "contradicted",
-        "uncertain",
-        "not_verifiable",
-    }
-    for raw in payload.get("requirement_checks") or []:
-        if not isinstance(raw, dict):
-            continue
-        start = _clamp_time(raw.get("start_seconds"), duration_seconds)
-        end = _clamp_time(raw.get("end_seconds"), duration_seconds, start)
-        status = str(raw.get("status") or "uncertain")
-        if status not in allowed_check_status:
-            status = "uncertain"
-        checks.append(
-            {
-                "requirement_ko": str(raw.get("requirement_ko") or "").strip(),
-                "category": str(raw.get("category") or "other"),
-                "status": status,
-                "start_seconds": start,
-                "end_seconds": max(start, end),
-                "evidence_ko": str(raw.get("evidence_ko") or "").strip(),
-            }
-        )
-
-    issues_out: list[dict[str, Any]] = []
-    for raw in payload.get("issues") or []:
-        if not isinstance(raw, dict):
-            continue
-
-        start = _clamp_time(raw.get("start_seconds"), duration_seconds)
-        end = _clamp_time(raw.get("end_seconds"), duration_seconds, start)
-
-        severity = str(raw.get("severity") or "advisory")
-        if severity not in {"blocking", "major", "minor", "advisory"}:
-            severity = "advisory"
-
-        workflow = str(raw.get("recommended_workflow") or "none")
-        if workflow not in {"retake", "manual_review", "none"}:
-            workflow = "manual_review"
-
-        strength = max(
-            0.0,
-            min(1.0, _safe_float(raw.get("retake_strength"), 1.0)),
-        )
-
-        issues_out.append(
-            {
-                "severity": severity,
-                "type": str(raw.get("type") or "other"),
-                "sample_indices": [],
-                "start_seconds": start,
-                "end_seconds": max(start, end),
-                "evidence_ko": str(raw.get("evidence_ko") or "").strip(),
-                "recommended_workflow": workflow,
-                "retake_prompt_en": str(
-                    raw.get("retake_prompt_en") or ""
-                ).strip(),
-                "retake_strength": strength,
-            }
-        )
-
-    hard_issue = any(
-        item["severity"] in {"blocking", "major"} for item in issues_out
-    )
-    accepted = bool(payload.get("accepted", not hard_issue))
-    if hard_issue:
-        accepted = False
-
-    action = str(payload.get("recommended_action") or "")
-    if action not in {"accept", "retake", "manual_review"}:
-        if accepted:
-            action = "accept"
-        elif any(
-            item["recommended_workflow"] == "retake"
-            for item in issues_out
-            if item["severity"] in {"blocking", "major"}
-        ):
-            action = "retake"
-        else:
-            action = "manual_review"
-
-    uncertain_core = any(
-        item["status"] in {"uncertain", "not_verifiable"}
-        and item["category"] in {
-            "character",
-            "entity",
-            "action",
-            "timing",
-            "camera",
-            "dialogue",
-            "audio",
-            "continuity",
-        }
-        for item in checks
-    )
-    if accepted and uncertain_core:
-        accepted = False
-        action = "manual_review"
-
-    categories = {item["category"] for item in checks}
-    issue_types = {item["type"] for item in issues_out}
-    motion_issue_types = {
-        "action_mismatch",
-        "temporal_mismatch",
-        "camera_mismatch",
-        "character_continuity",
-        "deformation",
-    }
-    artifact_issue_types = {
-        "deformation",
-        "character_continuity",
-        "extra_character",
-        "text_artifact",
-        "lighting_continuity",
-    }
-    missing_quality_audits = []
-    if (
-        not categories.intersection({"action", "continuity"})
-        and not issue_types.intersection(motion_issue_types)
-    ):
-        missing_quality_audits.append("동작/연속성")
-    if "artifact" not in categories and not issue_types.intersection(
-        artifact_issue_types
-    ):
-        missing_quality_audits.append("영상 아티팩트")
-    if missing_quality_audits:
-        accepted = False
-        action = "manual_review"
-        issues_out.append(
-            {
-                "severity": "advisory",
-                "type": "other",
-                "sample_indices": [],
-                "start_seconds": 0.0,
-                "end_seconds": duration_seconds,
-                "evidence_ko": (
-                    "필수 품질 점검 항목이 응답에서 누락되었습니다: "
-                    + ", ".join(missing_quality_audits)
-                ),
-                "recommended_workflow": "manual_review",
-                "retake_prompt_en": "",
-                "retake_strength": 0.0,
-            }
-        )
-
-    if accepted:
-        action = "accept"
-
-    confidence = max(
-        0.0,
-        min(1.0, _safe_float(payload.get("confidence"), 0.0)),
-    )
-
-    return {
-        "accepted": accepted,
-        "confidence": confidence,
-        "summary_ko": str(payload.get("summary_ko") or "").strip(),
-        "requirement_checks": checks,
-        "issues": issues_out,
-        "recommended_action": action,
-    }
-
-
-def _request_context(
-    *,
-    original_request: dict[str, Any],
-    generation_summary: dict[str, Any],
-    batch_id: str,
-    job_id: str,
-    duration_seconds: float,
-    media_probe: dict[str, Any],
-) -> dict[str, Any]:
-    segments = []
-    for item in original_request.get("segments") or []:
-        segments.append(
-            {
-                "order": item.get("order"),
-                "seconds": item.get("seconds"),
-                "prompt": item.get("prompt"),
-                "image": item.get("original_name"),
-            }
-        )
-    return {
-        "batch_id": batch_id,
-        "job_id": job_id,
-        "duration_seconds": duration_seconds,
-        "fps": original_request.get("fps"),
-        "resolution": original_request.get("resolution"),
-        "seed": original_request.get("seed"),
-        "global_prompt": original_request.get("global_prompt"),
-        "segments": segments,
-        "media_probe": {
-            "has_audio": media_probe.get("has_audio"),
-            "audio_reviewed": media_probe.get("audio_reviewed"),
-            "video_streams": media_probe.get("video_streams"),
-            "audio_streams": media_probe.get("audio_streams"),
-        },
-    }
-
-
-def review_video(
-    *,
-    video_path: Path,
-    original_request: dict[str, Any],
-    generation_summary: dict[str, Any],
-    batch_id: str,
-    job_id: str,
-) -> dict[str, Any]:
-    if not video_path.is_file():
-        raise FileNotFoundError(f"검수 영상 파일이 없습니다: {video_path}")
-
-    media_probe = probe_video(video_path)
-    if not media_probe.get("has_video"):
-        raise VLLMReviewError(f"검수 파일에 영상 스트림이 없습니다: {video_path}")
-
-    summary_duration = _safe_float(
-        generation_summary.get("total_seconds"),
-        0.0,
-    )
-    probed_duration = _safe_float(
-        media_probe.get("duration_seconds"),
-        0.0,
-    )
-    duration_seconds = probed_duration or summary_duration
-    if duration_seconds <= 0:
-        duration_seconds = sum(
-            _safe_float(item.get("seconds"), 0.0)
-            for item in (original_request.get("segments") or [])
-        )
-    duration_seconds = max(0.0, duration_seconds)
-
-    use_audio = _should_use_audio(media_probe)
-    media_probe["audio_reviewed"] = use_audio
-    media_probe["source_has_audio"] = bool(media_probe.get("has_audio"))
-    media_probe["audio_review_note"] = (
-        "The original video audio track was supplied to Qwen3-Omni."
-        if use_audio
-        else (
-            "The source video has no audio track."
-            if not media_probe.get("has_audio")
-            else "Audio review is disabled by VLLM_REVIEW_USE_AUDIO_IN_VIDEO."
-        )
-    )
-
-    model = _model_id()
-    video_data_url, video_metadata = _direct_video_data_url(video_path)
-    reference_video_data_url: str | None = None
-    reference_video_metadata: dict[str, Any] | None = None
-    reference_value=str(original_request.get("comparison_source_video_path") or "").strip()
-    reference_path=Path(reference_value) if reference_value else None
-    if reference_path is not None:
-        if not reference_path.is_file():
-            raise FileNotFoundError(f"업스케일 비교 원본 영상이 없습니다: {reference_path}")
-        reference_video_data_url,reference_video_metadata=_direct_video_data_url(reference_path)
-        reference_video_metadata["media_probe"]=probe_video(reference_path)
-    audio_data_url: str | None = None
-    audio_metadata: dict[str, Any] | None = None
-    if use_audio:
-        audio_data_url, audio_metadata = _direct_audio_data_url(video_path)
-
-    video_metadata.update(
-        {
-            "audio_input": audio_metadata,
-            "duration_seconds": round(duration_seconds, 3),
-            "audio_supplied": use_audio,
-            "source_has_audio": bool(media_probe.get("has_audio")),
-            "video_streams": media_probe.get("video_streams") or [],
-            "audio_streams": media_probe.get("audio_streams") or [],
-        }
-    )
-
-    video_instruction = {
-        "transport": VLLM_REVIEW_VIDEO_TRANSPORT,
-        "complete_source_video": True,
-        "duration_seconds": round(duration_seconds, 3),
-        "audio_supplied": use_audio,
-        "instruction": (
-            "Review the attached complete source video directly. Evaluate actual "
-            "motion and timing across the clip. When audio is supplied, listen to "
-            "speech, narration, and sound and compare them with the request."
-        ),
-    }
-
-    observation: dict[str, Any] | None = None
-    observation_message: dict[str, Any] | None = None
-    observation_raw = ""
-
-    if VLLM_VIDEO_REVIEW_TWO_PASS:
-        (
-            observation_payload,
-            observation_message,
-            observation_raw,
-        ) = _response_json(
-            model=model,
-            system_prompt=OBSERVATION_SYSTEM_PROMPT,
-            required_keys={
-                "observed_summary_ko",
-                "timeline",
-                "audio_observation",
-            },
-            user_text=(
-                "Observe this complete source video without comparing it to any "
-                "intended prompt.\n"
-                + json.dumps(
-                    video_instruction,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-            ),
-            video_data_url=video_data_url,
-            audio_data_url=audio_data_url,
-            video_metadata=video_metadata,
-        )
-        observation = _normalize_observation(
-            observation_payload,
-            duration_seconds=duration_seconds,
-            audio_reviewed=use_audio,
-        )
-
-    context = _request_context(
-        original_request=original_request,
-        generation_summary=generation_summary,
-        batch_id=batch_id,
-        job_id=job_id,
-        duration_seconds=duration_seconds,
-        media_probe=media_probe,
-    )
-    context["video_input"] = video_instruction
-    comparison_instruction=""
-    if reference_video_data_url:
-        context["upscale_comparison"]={
-            "enabled":True,
-            "reference_role":"selected_candidate",
-            "result_role":"upscaled_result",
-            "must_preserve":["character_identity","facial_proportions","costume","body_proportions",
-                             "motion","timing","camera_composition","lip_timing"],
-        }
-        comparison_instruction=(
-            "The first attached video is the selected candidate reference and the second is the "
-            "upscaled result. Reject the result if upscaling changes character identity, face, "
-            "costume, body proportions, motion trajectory, action timing, camera composition or "
-            "lip timing. Confirm that useful detail improved without temporal flicker or invented "
-            "anatomy. "
-        )
-
-    if observation is not None:
-        system_prompt = COMPLIANCE_SYSTEM_PROMPT
-        review_text = (
-            comparison_instruction
-            + "Compare the attached complete source video against the production "
-            "request.\n\nPRODUCTION REQUEST AND METADATA:\n"
-            + json.dumps(context,ensure_ascii=False,separators=(",", ":"))
-            + "\n\nINDEPENDENT FIRST-PASS OBSERVATION:\n"
-            + json.dumps(observation,ensure_ascii=False,separators=(",", ":"))
-        )
-    else:
-        system_prompt = ONE_PASS_SYSTEM_PROMPT
-        review_text = (
-            comparison_instruction
-            + "Review the attached complete source video against this production request:\n"
-            + json.dumps(context,ensure_ascii=False,separators=(",", ":"))
-        )
-
-    (
-        review_payload,
-        review_message,
-        review_raw,
-    ) = _response_json(
-        model=model,
-        system_prompt=system_prompt,
-        required_keys={
-            "accepted",
-            "confidence",
-            "summary_ko",
-            "requirement_checks",
-            "issues",
-            "recommended_action",
-        },
-        user_text=review_text,
-        video_data_url=video_data_url,
-        audio_data_url=audio_data_url,
-        video_metadata=video_metadata,
-        reference_video_data_url=reference_video_data_url,
-        reference_video_metadata=reference_video_metadata,
-    )
-
-    report = _normalize_report(
-        review_payload,
-        duration_seconds=duration_seconds,
-    )
-    report.update(
-        {
-            "review_mode": (
-                "direct_source_video_two_pass"
-                if VLLM_VIDEO_REVIEW_TWO_PASS
-                else "direct_source_video_one_pass"
-            ),
-            "video_transport": (
-                review_payload.get("_video_transport")
-                or VLLM_REVIEW_VIDEO_TRANSPORT
-            ),
-            "model": model,
-            "batch_id": batch_id,
-            "job_id": job_id,
-            "video_local_path": str(video_path),
-            "duration_seconds": round(duration_seconds, 3),
-            "media_probe": media_probe,
-            "video_input": video_metadata,
-            "observation": observation,
-            "raw_observation_response": observation_raw,
-            "raw_response": review_raw,
-        }
-    )
-
-    if VLLM_REVIEW_STORE_RAW_MESSAGE:
-        report["raw_observation_message"] = observation_message
-        report["raw_message"] = review_message
-
-    return report

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import candidate_reviews
+import review_contract
 import vllm_reviewer as omni
 
 
@@ -230,14 +230,14 @@ def _normalize(
             continue
 
     issues = []
-    for index, raw in enumerate((payload.get("issues") or [])[:candidate_reviews.MAX_ISSUES], 1):
+    for index, raw in enumerate((payload.get("issues") or [])[:review_contract.MAX_ISSUES], 1):
         if not isinstance(raw, dict):
             continue
         category = str(raw.get("category") or "other")
-        if category not in candidate_reviews.CATEGORIES:
+        if category not in review_contract.CATEGORIES:
             category = "other"
         severity = str(raw.get("severity") or "major")
-        if severity not in candidate_reviews.SEVERITIES:
+        if severity not in review_contract.SEVERITIES:
             severity = "major"
         start, end = _normalize_check_time(raw, duration)
         observed = str(
@@ -275,7 +275,7 @@ def _normalize(
             "cause_hypothesis": "",
             "suggestion": "Make this required action visually explicit with a clear subject, action, timing, and end state.",
         })
-        if len(issues) >= candidate_reviews.MAX_ISSUES:
+        if len(issues) >= review_contract.MAX_ISSUES:
             break
 
     unresolved = [item for item in event_checks if item["status"] != "verified"]
@@ -324,7 +324,7 @@ def _normalize(
         "positive_note": str(payload.get("positive_note") or "").strip(),
         "overall_note": overall_note,
         "scores": scores,
-        "issues": issues[:candidate_reviews.MAX_ISSUES],
+        "issues": issues[:review_contract.MAX_ISSUES],
         "event_checks": event_checks,
         "forbidden_checks": forbidden_checks,
         "enforcement": {
@@ -341,7 +341,7 @@ def _normalize(
 
 
 def review_benchmark_video(
-    *, video_path: Path, request: dict[str, Any], batch_id: str, job_id: str,
+    *, video_path: Path, request: dict[str, Any], review_queue_id: str, job_id: str,
 ) -> dict[str, Any]:
     if not video_path.is_file():
         raise FileNotFoundError(f"검수 영상 파일이 없습니다: {video_path}")
@@ -356,19 +356,6 @@ def review_benchmark_video(
     if use_audio:
         audio_data_url, audio_metadata = omni._direct_audio_data_url(video_path)
         video_metadata["audio_input"] = audio_metadata
-    observation = None
-    observation_raw = ""
-    if omni.VLLM_VIDEO_REVIEW_TWO_PASS:
-        observed, _message, observation_raw = omni._response_json(
-            model=omni._model_id(), system_prompt=omni.OBSERVATION_SYSTEM_PROMPT,
-            required_keys={"observed_summary_ko", "timeline", "audio_observation"},
-            user_text="Observe this complete benchmark video without seeing its intended prompt.",
-            video_data_url=video_data_url, audio_data_url=audio_data_url,
-            video_metadata=video_metadata,
-        )
-        observation = omni._normalize_observation(
-            observed, duration_seconds=duration, audio_reviewed=use_audio,
-        )
     context = {
         "case_title": request.get("case_title"),
         "canonical_prompt_en": request.get("canonical_prompt"),
@@ -377,7 +364,6 @@ def review_benchmark_video(
         "duration_seconds": duration,
         "fps": request.get("settings", {}).get("fps"),
         "audio_reviewed": use_audio,
-        "independent_observation": observation,
     }
     payload, _message, raw = omni._response_json(
         model=omni._model_id(), system_prompt=SYSTEM_PROMPT,
@@ -408,9 +394,9 @@ def review_benchmark_video(
         "rubric_version": "strict_prompt_compliance_v2",
         "duration_seconds": round(duration, 3),
         "media_probe": probe,
-        "observation": observation,
-        "raw_observation_response": observation_raw,
+        "observation": None,
+        "raw_observation_response": "",
         "raw_response": raw,
-        "batch_id": batch_id,
+        "review_queue_id": review_queue_id,
         "job_id": job_id,
     }

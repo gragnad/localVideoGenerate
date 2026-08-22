@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from batch_manager import attach_job_to_batch, create_new_open_batch, load_batch, update_batch
+
 from job_queue import atomic_write_json, now_iso, update_status
 import model_test_assets
 import model_test_registry
@@ -29,12 +29,31 @@ def _job_id(case_version_id: str, repetition: int) -> str:
     return f"benchmark_{datetime.now():%Y%m%d_%H%M%S}_{token}_r{repetition:02d}_{os.urandom(2).hex()}"
 
 
-def _runtime_id(session: Any, profile: Any) -> str:
+def _session_workflow_settings(session: Any) -> dict[str, Any]:
+    if "workflow_settings_json" not in session.keys():
+        return {}
+    try:
+        value = json.loads(session["workflow_settings_json"] or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _runtime_id(
+    session: Any,
+    profile: Any,
+    workflow_settings: dict[str, Any] | None = None,
+) -> str:
     return "runtime_" + _hash_json({
         "model_id": session["model_id"],
         "engine": "ComfyUI",
         "workflow_profile_id": session["workflow_profile_id"],
         "workflow_sha256": profile["workflow_sha256"],
+        "workflow_settings": (
+            workflow_settings
+            if workflow_settings is not None
+            else _session_workflow_settings(session)
+        ),
     })[:24]
 
 
@@ -109,236 +128,259 @@ def queue_session(root: Path, session_id: str) -> dict[str, Any]:
     session_id = str(session_id or "").strip()
     if not session_id:
         raise ValueError("테스트 세션 ID가 필요합니다.")
-    jobs_root = root / "jobs"
-    with model_test_registry.open_registry(root) as connection:
-        session = connection.execute(
-            "SELECT * FROM test_sessions WHERE session_id=?", (session_id,)
-        ).fetchone()
-        if not session:
-            raise FileNotFoundError("테스트 세션을 찾을 수 없습니다.")
-        existing = connection.execute(
-            "SELECT batch_id FROM test_session_batches WHERE session_id=?", (session_id,)
-        ).fetchone()
-        if existing:
-            raise RuntimeError(f"이미 전용 큐에 등록된 세션입니다: {existing['batch_id']}")
-        preflight = workflow_adapter.preflight_session(connection, session_id)
-        if preflight["status"] != "ready":
-            raise RuntimeError(
-                f"사전검사를 통과하지 못했습니다: 준비 {preflight['ready_count']}개 · "
-                f"차단 {preflight['blocked_count']}개"
-            )
-        session = connection.execute(
-            "SELECT * FROM test_sessions WHERE session_id=?", (session_id,)
-        ).fetchone()
-        specs = _prepare_specs(root, connection, session)
+    return queue_h3_session(root, session_id)
 
-        settings = {
-            "auto_review": True,
-            "auto_modify": False,
-            "auto_recheck": False,
-            "max_modify_cycles": 0,
-            "batch_idle_grace_seconds": 1,
-        }
-        batch = create_new_open_batch(root, settings)
-        batch_id = str(batch["batch_id"])
-        update_batch(
-            root,
-            batch_id,
-            batch_mode="model_benchmark",
-            test_session_ids=[session_id],
-            registration_closed=False,
-            pipeline_version="1.8.0",
-            message=f"모델 테스트 {len(specs)}건을 등록하고 있습니다.",
-        )
-        runtime_id = _runtime_id(session, specs[0]["profile"])
-        connection.execute(
-            """INSERT OR IGNORE INTO model_runtimes(
-                   runtime_id,model_id,engine,device_profile,runtime_config_json
-               ) VALUES (?,?,?,?,?)""",
-            (
-                runtime_id,
-                session["model_id"],
-                "ComfyUI",
-                "DGX Spark",
-                _json({
-                    "workflow_profile_id": session["workflow_profile_id"],
-                    "metadata_completeness": "workflow_bound_runtime",
-                    "unknown_fields": ["engine_version", "dtype", "quantization"],
-                }),
-            ),
-        )
-        queued_jobs = []
-        created_at = now_iso()
-        for queue_order, spec in enumerate(specs, start=1):
-            case = spec["case"]
-            compiled = spec["compiled"]
-            repetition = spec["repetition"]
-            job_id = _job_id(case["case_version_id"], repetition)
-            job_dir = jobs_root / job_id
-            job_dir.mkdir(parents=True, exist_ok=False)
-            workflow_path = job_dir / "selected_workflow_api.json"
-            atomic_write_json(workflow_path, compiled["compiled_workflow"])
-            run_id = f"run_{job_id}"
-            prompt_variant_id = _prompt_variant_id(session, case, spec["adapter"], compiled)
-            settings_payload = dict(compiled["settings"])
-            request = {
-                "schema_version": 1,
-                "job_type": "model_benchmark",
-                "pipeline_stage": "model_benchmark_generation",
-                "job_id": job_id,
-                "batch_id": batch_id,
-                "job_dir": str(job_dir),
-                "engine_root": str(root),
-                "created_at": created_at,
-                "test_session_id": session_id,
-                "case_version_id": case["case_version_id"],
-                "case_id": case["case_id"],
-                "case_title": case["title"],
-                "canonical_prompt": spec["prompt_text"],
-                "review_intent_ko": case["intent_ko"],
-                "benchmark_contract": compiled.get("benchmark_contract") or json.loads(case["contract_json"] or "{}"),
-                "case_settings": compiled.get("case_settings") or {},
-                "repetition": repetition,
-                "run_id": run_id,
-                "queue_order": queue_order,
-                "model_id": session["model_id"],
-                "runtime_id": runtime_id,
-                "prompt_variant_id": prompt_variant_id,
-                "workflow_profile_id": session["workflow_profile_id"],
-                "adapter_id": session["adapter_id"],
-                "workflow_kind": spec["profile"]["profile_kind"],
-                "workflow_filename": spec["profile"]["workflow_filename"],
-                "source_workflow_sha256": compiled["source_workflow_sha256"],
-                "compiled_workflow_sha256": compiled["workflow_sha256"],
-                "prompt_sha256": compiled["prompt_sha256"],
-                "template_path": str(workflow_path),
-                "settings": settings_payload,
-                "resolution": {"width": settings_payload.get("width"), "height": settings_payload.get("height")},
-                "assets": spec["assets"],
-                "filename_prefix": (
-                    f"video/model-tests/{session_id}/{case['case_version_id']}_{repetition:02d}"
-                ),
-                "comfy_url": os.environ.get("COMFY_URL", "http://127.0.0.1:8188"),
-                "comfy_start_script": os.environ.get(
-                    "COMFY_START_SCRIPT", str(Path.home() / "bin/ai-start-comfy")
-                ),
-                "comfy_start_timeout": float(os.environ.get("COMFY_START_TIMEOUT", "180")),
-                "auto_start_comfy": True,
-                "automation": settings,
-            }
-            manifest = {
-                "schema_version": 1,
-                "job_id": job_id,
-                "batch_id": batch_id,
-                "job_type": "model_benchmark",
-                "pipeline_stage": "model_benchmark_generation",
-                "test_session_id": session_id,
-                "case_version_id": case["case_version_id"],
-                "repetition": repetition,
-                "run_id": run_id,
-                "resolution": {"width": settings_payload.get("width"), "height": settings_payload.get("height")},
-                "status": "queued",
-                "created_at": created_at,
-                "outputs": [],
-            }
-            atomic_write_json(job_dir / "request.json", request)
-            atomic_write_json(job_dir / "manifest.json", manifest)
-            update_status(
-                job_dir,
-                "queued",
-                stage="모델 테스트 worker 대기",
-                message=f"{case['title']} · 반복 {repetition}",
-                progress=0.0,
-                created_at=created_at,
+
+def queue_h3_session(root: Path, session_id: str) -> dict[str, Any]:
+    """Compile a model benchmark session directly into the batch-free H3 queue."""
+    import h3_queue
+
+    paths = h3_queue.roots(root)
+    created_at = now_iso()
+    queue_id = f"h3testq_{datetime.now():%Y%m%d_%H%M%S}_{os.urandom(3).hex()}"
+    queue_dir = paths["test_queues"] / queue_id
+    queue_dir.mkdir(parents=True, exist_ok=False)
+    try:
+        with model_test_registry.open_registry(root) as connection:
+            session = connection.execute(
+                "SELECT * FROM test_sessions WHERE session_id=?", (session_id,)
+            ).fetchone()
+            if not session:
+                raise FileNotFoundError("테스트 세션을 찾을 수 없습니다.")
+            model = connection.execute(
+                "SELECT provider,family,display_name,version FROM models WHERE model_id=?",
+                (session["model_id"],),
+            ).fetchone()
+            if model_test_registry.is_legacy_ltx_model(model):
+                raise ValueError("LTX 테스트 세션은 과거 검수 데이터 열람 전용입니다.")
+            is_r2v = model_test_registry.model_test_r2v.is_r2v_suite_id(session["suite_id"])
+            is_i2v = (
+                session["suite_id"] == model_test_registry.I2V_SUITE_ID
+                or model_test_registry.model_test_i2v.is_i2v_suite_id(session["suite_id"])
             )
-            attach_job_to_batch(root, batch_id, job_id, "benchmark")
-            connection.execute(
-                """INSERT OR IGNORE INTO prompt_variants(
-                       prompt_variant_id,case_id,model_id,adapter_name,adapter_version,
-                       global_prompt,prompt_json,content_sha256
-                   ) VALUES (?,?,?,?,?,?,?,?)""",
-                (
-                    prompt_variant_id,
-                    case["case_id"],
-                    session["model_id"],
-                    spec["adapter"]["adapter_name"],
-                    spec["adapter"]["adapter_version"],
-                    spec["prompt_text"],
-                    _json({"canonical_prompt": spec["prompt_text"]}),
-                    compiled["prompt_sha256"],
-                ),
-            )
-            connection.execute(
-                """INSERT INTO generation_runs(
-                       run_id,job_id,case_id,model_id,runtime_id,prompt_variant_id,
-                       workflow_kind,workflow_filename,workflow_sha256,seed_text,seed_mode,
-                       width,height,fps,frame_count,duration_seconds,status,settings_json,created_at
-                   ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    run_id,
-                    job_id,
-                    case["case_id"],
-                    session["model_id"],
-                    runtime_id,
-                    prompt_variant_id,
-                    spec["profile"]["profile_kind"],
-                    spec["profile"]["workflow_filename"],
-                    compiled["source_workflow_sha256"],
-                    str(settings_payload.get("seed")),
-                    "fixed_repetition_offset",
-                    settings_payload.get("width"),
-                    settings_payload.get("height"),
-                    settings_payload.get("fps"),
-                    settings_payload.get("frame_count"),
-                    (
-                        float(settings_payload.get("frame_count") or 0)
-                        / float(settings_payload.get("fps") or 1)
-                    ),
-                    "queued",
-                    _json({
-                        "test_session_id": session_id,
-                        "case_version_id": case["case_version_id"],
-                        "repetition": repetition,
-                        "compiled_workflow_sha256": compiled["workflow_sha256"],
-                        "resolution": {"width": settings_payload.get("width"), "height": settings_payload.get("height")},
-                    }),
-                    created_at,
-                ),
-            )
-            connection.execute(
-                "INSERT INTO test_session_runs(session_id,case_version_id,run_id,repetition) VALUES (?,?,?,?)",
-                (session_id, case["case_version_id"], run_id, repetition),
-            )
-            for ordering, asset in enumerate(spec["assets"], start=1):
-                connection.execute(
-                    "INSERT OR IGNORE INTO run_assets(run_id,asset_id,role,slot,ordering) VALUES (?,?,?,?,?)",
-                    (run_id, asset["asset_id"], asset["role"], ordering, ordering),
+            job_type = "h3_r2v_benchmark" if is_r2v else "h3_model_benchmark"
+            generation_mode = "r2v" if is_r2v else "i2v" if is_i2v else "model"
+            test_label = "H3 R2V 테스트" if is_r2v else "H3 I2V 테스트" if is_i2v else "H3 일반 모델 테스트"
+            existing = connection.execute(
+                "SELECT COUNT(*) count FROM test_session_runs WHERE session_id=?", (session_id,)
+            ).fetchone()
+            if int(existing["count"] or 0):
+                raise RuntimeError("이미 H3 테스트 큐에 등록된 세션입니다.")
+            preflight = workflow_adapter.preflight_session(connection, session_id)
+            if preflight["status"] != "ready":
+                raise RuntimeError(
+                    f"사전검사를 통과하지 못했습니다: 준비 {preflight['ready_count']}개 · "
+                    f"차단 {preflight['blocked_count']}개"
                 )
-            queued_jobs.append(job_id)
-        connection.execute(
-            "INSERT INTO test_session_batches(session_id,batch_id,queued_at) VALUES (?,?,?)",
-            (session_id, batch_id, created_at),
-        )
-        connection.execute(
-            "UPDATE test_sessions SET status='queued',updated_at=? WHERE session_id=?",
-            (created_at, session_id),
-        )
-        connection.commit()
-        update_batch(
-            root,
-            batch_id,
-            registration_closed=True,
-            registration_closed_at=now_iso(),
-            stage="benchmark_jobs_queued",
-            next_stage="generation",
-            message=f"모델 테스트 {len(queued_jobs)}건이 전용 큐에 등록되었습니다.",
-        )
+            session = connection.execute(
+                "SELECT * FROM test_sessions WHERE session_id=?", (session_id,)
+            ).fetchone()
+            specs = _prepare_specs(root, connection, session)
+            effective_workflow_settings = dict(
+                specs[0]["compiled"]["settings"].get("workflow_settings") or {}
+            )
+            runtime_id = _runtime_id(
+                session, specs[0]["profile"], effective_workflow_settings
+            )
+            connection.execute(
+                """INSERT OR IGNORE INTO model_runtimes(
+                       runtime_id,model_id,engine,device_profile,runtime_config_json
+                   ) VALUES (?,?,?,?,?)""",
+                (
+                    runtime_id,
+                    session["model_id"],
+                    "ComfyUI",
+                    "DGX Spark",
+                    _json({
+                        "workflow_profile_id": session["workflow_profile_id"],
+                        "queue_backend": "h3_generation",
+                        "workflow_settings": effective_workflow_settings,
+                        "metadata_completeness": "workflow_bound_runtime",
+                        "unknown_fields": ["engine_version", "dtype", "quantization"],
+                    }),
+                ),
+            )
+            queued_jobs = []
+            for queue_order, spec in enumerate(specs, start=1):
+                case = spec["case"]
+                compiled = spec["compiled"]
+                repetition = spec["repetition"]
+                base_id = _job_id(case["case_version_id"], repetition).replace("benchmark_", "h3bench_", 1)
+                job_id = base_id
+                job_dir = paths["jobs"] / job_id
+                job_dir.mkdir(parents=True, exist_ok=False)
+                atomic_write_json(job_dir / "workflow_api.json", compiled["compiled_workflow"])
+                run_id = f"run_{job_id}"
+                prompt_variant_id = _prompt_variant_id(session, case, spec["adapter"], compiled)
+                settings_payload = dict(compiled["settings"])
+                references = [{
+                    "picture_index": index,
+                    "role": asset["role"],
+                    "asset_id": asset["asset_id"],
+                    "source_path": asset["source_path"],
+                    "original_name": Path(asset["source_path"]).name,
+                    "sha256": asset["sha256"],
+                } for index, asset in enumerate(spec["assets"], start=1)]
+                reference_patches = [dict(asset["binding"]) for asset in spec["assets"]]
+                request = {
+                    "schema_version": 1,
+                    "job_type": job_type,
+                    "generation_mode": generation_mode,
+                    "queue_name": "h3_generation",
+                    "queue_lane": "local_generation",
+                    "pipeline_stage": "model_benchmark_generation",
+                    "job_id": job_id,
+                    "test_queue_id": queue_id,
+                    "engine_root": str(root),
+                    "created_at": created_at,
+                    "test_session_id": session_id,
+                    "case_version_id": case["case_version_id"],
+                    "case_id": case["case_id"],
+                    "case_title": case["title"],
+                    "canonical_prompt": spec["prompt_text"],
+                    "review_intent_ko": case["intent_ko"],
+                    "benchmark_contract": compiled.get("benchmark_contract") or json.loads(case["contract_json"] or "{}"),
+                    "case_settings": compiled.get("case_settings") or {},
+                    "repetition": repetition,
+                    "run_id": run_id,
+                    "queue_order": queue_order,
+                    "model_id": session["model_id"],
+                    "runtime_id": runtime_id,
+                    "prompt_variant_id": prompt_variant_id,
+                    "workflow_profile_id": session["workflow_profile_id"],
+                    "adapter_id": session["adapter_id"],
+                    "workflow_kind": spec["profile"]["profile_kind"],
+                    "workflow_filename": spec["profile"]["workflow_filename"],
+                    "source_workflow_sha256": compiled["source_workflow_sha256"],
+                    "compiled_workflow_sha256": compiled["workflow_sha256"],
+                    "prompt_sha256": compiled["prompt_sha256"],
+                    "settings": settings_payload,
+                    "resolution": {"width": settings_payload.get("width"), "height": settings_payload.get("height")},
+                    "assets": spec["assets"],
+                    "references": references,
+                    "reference_patches": reference_patches,
+                    "filename_prefix": f"video/model-tests/{session_id}/{case['case_version_id']}_{repetition:02d}",
+                    "comfy_url": os.environ.get("COMFY_URL", "http://127.0.0.1:8188"),
+                }
+                manifest = {
+                    "schema_version": 1,
+                    "job_id": job_id,
+                    "job_type": job_type,
+                    "test_queue_id": queue_id,
+                    "test_session_id": session_id,
+                    "case_version_id": case["case_version_id"],
+                    "repetition": repetition,
+                    "run_id": run_id,
+                    "resolution": request["resolution"],
+                    "workflow_settings": settings_payload.get("workflow_settings") or {},
+                    "status": "queued",
+                    "created_at": created_at,
+                    "outputs": [],
+                }
+                atomic_write_json(job_dir / "request.json", request)
+                atomic_write_json(job_dir / "manifest.json", manifest)
+                update_status(
+                    job_dir,
+                    "queued",
+                    stage=f"{test_label} 로컬 Worker 대기",
+                    message=f"{case['title']} · 반복 {repetition}",
+                    progress=0.0,
+                    created_at=created_at,
+                )
+                connection.execute(
+                    """INSERT OR IGNORE INTO prompt_variants(
+                           prompt_variant_id,case_id,model_id,adapter_name,adapter_version,
+                           global_prompt,prompt_json,content_sha256
+                       ) VALUES (?,?,?,?,?,?,?,?)""",
+                    (
+                        prompt_variant_id, case["case_id"], session["model_id"],
+                        spec["adapter"]["adapter_name"], spec["adapter"]["adapter_version"],
+                        spec["prompt_text"], _json({"canonical_prompt": spec["prompt_text"]}),
+                        compiled["prompt_sha256"],
+                    ),
+                )
+                connection.execute(
+                    """INSERT INTO generation_runs(
+                           run_id,job_id,case_id,model_id,runtime_id,prompt_variant_id,
+                           workflow_kind,workflow_filename,workflow_sha256,seed_text,seed_mode,
+                           width,height,fps,frame_count,duration_seconds,status,settings_json,created_at
+                       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        run_id, job_id, case["case_id"], session["model_id"], runtime_id,
+                        prompt_variant_id, spec["profile"]["profile_kind"],
+                        spec["profile"]["workflow_filename"], compiled["source_workflow_sha256"],
+                        str(settings_payload.get("seed")), "random_resolved",
+                        settings_payload.get("width"), settings_payload.get("height"),
+                        settings_payload.get("fps"), settings_payload.get("frame_count"),
+                        float(settings_payload.get("frame_count") or 0) / float(settings_payload.get("fps") or 1),
+                        "queued",
+                        _json({
+                            "test_session_id": session_id,
+                            "test_queue_id": queue_id,
+                            "queue_backend": "h3_generation",
+                            "case_version_id": case["case_version_id"],
+                            "repetition": repetition,
+                            "compiled_workflow_sha256": compiled["workflow_sha256"],
+                            "resolution": request["resolution"],
+                            "workflow_settings": settings_payload.get("workflow_settings") or {},
+                        }),
+                        created_at,
+                    ),
+                )
+                connection.execute(
+                    "INSERT INTO test_session_runs(session_id,case_version_id,run_id,repetition) VALUES (?,?,?,?)",
+                    (session_id, case["case_version_id"], run_id, repetition),
+                )
+                for ordering, asset in enumerate(spec["assets"], start=1):
+                    connection.execute(
+                        "INSERT OR IGNORE INTO run_assets(run_id,asset_id,role,slot,ordering) VALUES (?,?,?,?,?)",
+                        (run_id, asset["asset_id"], asset["role"], ordering, ordering),
+                    )
+                queued_jobs.append(job_id)
+            queue_payload = {
+                "schema_version": 1,
+                "test_queue_id": queue_id,
+                "queue_name": "h3_generation",
+                "queue_kind": f"{generation_mode}_model_test",
+                "generation_mode": generation_mode,
+                "status": "queued",
+                "test_session_id": session_id,
+                "suite_id": session["suite_id"],
+                "created_at": created_at,
+                "updated_at": created_at,
+                "job_ids": queued_jobs,
+                "job_count": len(queued_jobs),
+                "queued_count": len(queued_jobs),
+                "running_count": 0,
+                "completed_count": 0,
+                "failed_count": 0,
+            }
+            atomic_write_json(queue_dir / "queue.json", queue_payload)
+            connection.execute(
+                "UPDATE test_sessions SET status='queued',updated_at=? WHERE session_id=?",
+                (created_at, session_id),
+            )
+            connection.commit()
         return {
             "session_id": session_id,
-            "batch_id": batch_id,
+            "queue_id": queue_id,
+            "queue_backend": "h3_generation",
             "queued_count": len(queued_jobs),
             "job_ids": queued_jobs,
         }
+    except Exception:
+        atomic_write_json(queue_dir / "queue.json", {
+            "schema_version": 1,
+            "test_queue_id": queue_id,
+            "queue_name": "h3_generation",
+            "queue_kind": "r2v_model_test",
+            "status": "registration_failed",
+            "test_session_id": session_id,
+            "created_at": created_at,
+            "updated_at": now_iso(),
+        })
+        raise
+
 
 
 def set_session_review_status(
@@ -355,81 +397,6 @@ def set_session_review_status(
             [(status, now_iso(), session_id) for session_id in session_ids],
         )
         connection.commit()
-
-
-def queue_ai_review(root: Path, session_id: str) -> dict[str, Any]:
-    session_id = str(session_id or "").strip()
-    if not session_id:
-        raise ValueError("테스트 세션 ID가 필요합니다.")
-    with model_test_registry.open_registry(root) as connection:
-        session = connection.execute(
-            "SELECT * FROM test_sessions WHERE session_id=?", (session_id,)
-        ).fetchone()
-        if not session:
-            raise FileNotFoundError("테스트 세션을 찾을 수 없습니다.")
-        linked = connection.execute(
-            "SELECT batch_id FROM test_session_batches WHERE session_id=?", (session_id,)
-        ).fetchone()
-        if not linked:
-            raise RuntimeError("Qwen 검수에 연결할 전용 테스트 배치가 없습니다.")
-        rows = connection.execute(
-            """SELECT r.job_id FROM test_session_runs sr
-               JOIN generation_runs r ON r.run_id=sr.run_id
-               WHERE sr.session_id=? AND r.status='completed'
-               ORDER BY r.created_at,r.job_id""",
-            (session_id,),
-        ).fetchall()
-    completed_ids = [
-        str(row["job_id"]) for row in rows
-        if (root / "jobs" / str(row["job_id"]) / "manifest.json").is_file()
-    ]
-    if not completed_ids:
-        raise RuntimeError("Qwen이 검수할 완료 영상이 없습니다.")
-    batch_id = str(linked["batch_id"])
-    batch = load_batch(root, batch_id)
-    if not batch:
-        raise FileNotFoundError("연결된 모델 테스트 배치 이력을 찾을 수 없습니다.")
-    active = {
-        "ready_for_review_preparation", "preparing_video_review",
-        "ready_for_ai_review", "switching_to_vllm", "ai_reviewing",
-    }
-    if (
-        str(batch.get("status") or "") in active
-        and str(batch.get("pipeline_version") or "") == "1.8.0"
-    ):
-        return {
-            "session_id": session_id,
-            "batch_id": batch_id,
-            "queued_count": len(completed_ids),
-            "already_queued": True,
-        }
-    automation = dict(batch.get("automation") or {})
-    automation.update(auto_review=True, auto_modify=False, auto_recheck=False, max_modify_cycles=0)
-    update_batch(
-        root,
-        batch_id,
-        batch_mode="model_benchmark",
-        pipeline_version="1.8.0",
-        test_session_ids=[session_id],
-        automation=automation,
-        review_job_ids=completed_ids,
-        failed_review_job_ids=[],
-        review_video_paths={},
-        review_video_metadata={},
-        video_review_preparation_errors=[],
-        ai_review_errors=[],
-        status="ready_for_review_preparation",
-        stage="benchmark_review_queued",
-        next_stage="video_review",
-        message=f"기존 완료 영상 {len(completed_ids)}건의 Qwen 자동 검수를 대기합니다.",
-    )
-    set_session_review_status(root, [session_id], "ai_review_queued")
-    return {
-        "session_id": session_id,
-        "batch_id": batch_id,
-        "queued_count": len(completed_ids),
-        "already_queued": False,
-    }
 
 
 def record_result(

@@ -1,0 +1,31 @@
+{
+  "duration_seconds": 4,
+  "subjects": [
+    {
+      "subject_id": 1,
+      "picture_id": 1,
+      "name": "Lua",
+      "description": "A young spear fighter in blue dragon-scale armor"
+    }
+  ],
+  "summary": "Lua releases a charged spear strike that clears the blocked passage.",
+  "retention_analysis": [
+    {
+      "subject_id": 1,
+      "shots": [1],
+      "marker": "fully_preserved",
+      "description": "Preserve her face, armor, spear, and body proportions"
+    }
+  ],
+  "style_opening": [
+    "Moonlit stone ruins with wet surfaces and sharp cyan reflections"
+  ],
+  "shots": [
+    {
+      "number": 1,
+      "description": "A low three-quarter view frames <Subject 1> Lua as blue energy gathers at the spear tip. She plants her lead foot, turns her hips and shoulders so the spear sweeps with her whole body, then drives the charged point forward. The impact throws the blocking stone fragments outward and leaves the newly opened passage visible behind them."
+    }
+  ],
+  "overall_soundscape": "A rising spear hum, boots scraping wet stone, cracking rock, and one forceful impact burst.",
+  "non_diegetic_music": "Fast low strings rise into a single brass hit as the passage opens."
+}

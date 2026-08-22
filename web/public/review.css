@@ -1,0 +1,23 @@
+.candidate-review-dialog{width:min(600px,calc(100vw - 32px));max-width:600px;max-height:calc(100vh - 32px);padding:0;border:1px solid var(--line);border-radius:14px;background:#0c121c;color:var(--text)}
+.candidate-review-dialog::backdrop{background:#02050acc;backdrop-filter:blur(4px)}
+.candidate-review-dialog form{padding:22px;overflow:auto;max-height:calc(100vh - 32px)}
+.candidate-review-head,.candidate-review-issues-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.candidate-review-head h3,.candidate-review-issues-head h3{margin:4px 0}
+.candidate-review-overview{display:grid;grid-template-columns:220px 1fr 1fr;gap:12px;margin:18px 0;padding:16px;border:1px solid var(--line);border-radius:12px;background:#0a1018}
+.candidate-review-overview textarea{min-height:86px}
+.candidate-review-issues{display:grid;gap:12px;margin-top:12px}
+.candidate-review-empty{padding:28px;text-align:center;border:1px dashed var(--line);border-radius:12px;color:var(--muted)}
+.candidate-review-issue{border:1px solid var(--line);border-radius:12px;background:#0a1018;overflow:hidden}
+.candidate-review-issue summary{display:flex;align-items:center;gap:10px;padding:14px 16px;cursor:pointer;list-style:none}
+.candidate-review-issue summary::-webkit-details-marker{display:none}
+.candidate-review-issue summary b{flex:1}
+.candidate-review-issue-body{padding:0 16px 16px;border-top:1px solid var(--line)}
+.candidate-review-grid{display:grid;grid-template-columns:1fr 1fr 140px 120px 120px;gap:10px;margin:14px 0}
+.candidate-review-text-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.candidate-review-text-grid textarea{min-height:100px}
+.candidate-review-text-grid .wide{grid-column:1/-1}
+.candidate-review-actions{position:sticky;bottom:-22px;margin:18px -22px -22px;padding:14px 22px;background:#0c121cf2;border-top:1px solid var(--line);align-items:center}
+.candidate-review-actions span{margin-right:auto}
+.video-placeholder{width:100%;aspect-ratio:16/9;display:grid;place-items:center;padding:20px;border:1px solid var(--line);border-radius:8px;background:#05070b;color:var(--muted);text-align:center}
+.model-test-ai-state.ai-cancelled{background:#252936;color:#aeb8ca}
+@media(max-width:900px){.candidate-review-overview,.candidate-review-grid,.candidate-review-text-grid{grid-template-columns:1fr}.candidate-review-text-grid .wide{grid-column:auto}.candidate-review-dialog{width:calc(100vw - 16px);max-height:calc(100vh - 16px)}.candidate-review-dialog form{max-height:calc(100vh - 16px)}}

@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 import model_test_registry
+import model_test_assets
 import workflow_adapter
 
 
@@ -19,9 +20,14 @@ class WorkflowAdapterTest(unittest.TestCase):
         self.workflow_path.write_text(json.dumps({
             "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "default"}},
             "2": {"class_type": "RandomNoise", "inputs": {"noise_seed": 1}},
-            "3": {"class_type": "EmptyLTXVLatentVideo", "inputs": {"width": 512, "height": 288, "length": 97, "batch_size": 1}},
+            "3": {"class_type": "EmptyVideoLatent", "inputs": {"width": 512, "height": 288, "length": 97, "batch_size": 1}},
             "4": {"class_type": "SaveVideo", "inputs": {"filename_prefix": "output", "format": "auto"}},
             "5": {"class_type": "LoadImage", "inputs": {"image": "reference.png"}},
+            "6": {"class_type": "LoadImage", "inputs": {"image": "last.png"}},
+            "7": {
+                "class_type": "MiniMaxH3ImageToVideo",
+                "inputs": {"first_frame": ["5", 0], "last_frame": ["6", 0]},
+            },
         }), encoding="utf-8")
         self.model_id = model_test_registry.register_model(self.root, {
             "provider": "Provider", "family": "Family", "display_name": "Video Model", "version": "1"
@@ -92,6 +98,62 @@ class WorkflowAdapterTest(unittest.TestCase):
         self.assertEqual(result["suggested_bindings"]["prompt"], {"node_id": "1", "input": "prompt"})
         self.assertEqual(result["suggested_bindings"]["duration_seconds"], {"node_id": "2", "input": "value"})
 
+    def test_fractional_target_seconds_are_preserved_for_h3_float_duration(self):
+        h3_path = self.workflows / "h3_fractional_duration_api.json"
+        h3_path.write_text(json.dumps({
+            "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "default"}},
+            "2": {
+                "class_type": "PrimitiveFloat",
+                "_meta": {"title": "Float (Duration)"},
+                "inputs": {"value": 5.0},
+            },
+        }), encoding="utf-8")
+        profile_id = model_test_registry.register_workflow(self.root, self.workflows, {
+            "model_id": self.model_id,
+            "workflow_filename": h3_path.name,
+            "profile_kind": "controlled_variant",
+            "name": "H3 fractional duration",
+        })["workflow_profile_id"]
+        with model_test_registry.open_registry(self.root) as connection:
+            adapter_id = workflow_adapter.register_adapter(connection, {
+                "workflow_profile_id": profile_id,
+                "adapter_name": "H3 fractional duration binding",
+                "adapter_version": "1",
+                "bindings": {
+                    "prompt": {"node_id": "1", "input": "text"},
+                    "duration_seconds": {"node_id": "2", "input": "value"},
+                },
+            })["adapter_id"]
+        case_version_id = "benchmark_empty_environment_v1"
+        session_id = model_test_registry.create_session(self.root, {
+            "model_id": self.model_id,
+            "workflow_profile_id": profile_id,
+            "adapter_id": adapter_id,
+            "suite_id": model_test_registry.DEFAULT_SUITE_ID,
+            "repetitions": 1,
+        })["session_id"]
+        with model_test_registry.open_registry(self.root) as connection:
+            row = connection.execute(
+                "SELECT contract_json FROM benchmark_case_versions WHERE case_version_id=?",
+                (case_version_id,),
+            ).fetchone()
+            contract = json.loads(row["contract_json"])
+            contract["generation"]["target_seconds"] = 10.5
+            connection.execute(
+                "UPDATE benchmark_case_versions SET contract_json=? WHERE case_version_id=?",
+                (json.dumps(contract), case_version_id),
+            )
+            connection.commit()
+            session = connection.execute(
+                "SELECT * FROM test_sessions WHERE session_id=?", (session_id,)
+            ).fetchone()
+            result = workflow_adapter.compile_case(
+                connection, session, case_version_id
+            )
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["settings"]["duration_seconds"], 10.5)
+        self.assertEqual(result["compiled_workflow"]["2"]["inputs"]["value"], 10.5)
+
     def test_ui_graph_uses_embedded_widget_metadata(self):
         ui_path = self.workflows / "official_ui.json"
         ui_path.write_text(json.dumps({
@@ -157,9 +219,104 @@ class WorkflowAdapterTest(unittest.TestCase):
             result = workflow_adapter.compile_case(connection, session, case_id, 2)
         self.assertEqual(result["status"], "ready")
         self.assertIn("Official prompt rules", result["compiled_workflow"]["1"]["inputs"]["text"])
-        self.assertEqual(result["compiled_workflow"]["2"]["inputs"]["noise_seed"], 831913303995592)
+        seed = result["compiled_workflow"]["2"]["inputs"]["noise_seed"]
+        self.assertGreaterEqual(seed, 0)
+        self.assertLess(seed, 2**63)
+        self.assertEqual(result["settings"]["seed"], seed)
         source = json.loads(self.workflow_path.read_text(encoding="utf-8"))
         self.assertEqual(source["1"]["inputs"]["text"], "default")
+
+    def test_fflf_optional_last_frame_is_removed_when_case_only_has_start_image(self):
+        with model_test_registry.open_registry(self.root) as connection:
+            adapter_id = workflow_adapter.register_adapter(connection, {
+                "workflow_profile_id": self.profile_id,
+                "adapter_name": "FFLF binding",
+                "adapter_version": "1",
+                "bindings": {
+                    **self.bindings(),
+                    "last_reference_image": {"node_id": "6", "input": "image"},
+                },
+            })["adapter_id"]
+            case_id = "benchmark_reference_following_v1"
+            upload = self.root / "start.png"
+            upload.write_bytes(b"\x89PNG\r\n\x1a\n" + b"start")
+            model_test_assets.save_and_link(self.root, connection, {
+                "case_version_id": case_id,
+                "role": "reference_image",
+                "upload_path": str(upload),
+            })
+        session_id = model_test_registry.create_session(self.root, {
+            "model_id": self.model_id,
+            "workflow_profile_id": self.profile_id,
+            "adapter_id": adapter_id,
+            "suite_id": model_test_registry.DEFAULT_SUITE_ID,
+            "repetitions": 1,
+        })["session_id"]
+        with model_test_registry.open_registry(self.root) as connection:
+            session = connection.execute(
+                "SELECT * FROM test_sessions WHERE session_id=?", (session_id,)
+            ).fetchone()
+            result = workflow_adapter.compile_case(connection, session, case_id)
+        self.assertEqual("ready", result["status"])
+        self.assertNotIn("6", result["compiled_workflow"])
+        self.assertNotIn("last_frame", result["compiled_workflow"]["7"]["inputs"])
+        self.assertEqual(
+            {"node_id": "5", "input": "image"},
+            result["assets"][0]["binding"],
+        )
+        source = json.loads(self.workflow_path.read_text(encoding="utf-8"))
+        self.assertIn("6", source)
+        self.assertIn("last_frame", source["7"]["inputs"])
+
+    def test_fflf_start_and_last_assets_compile_in_frame_order(self):
+        with model_test_registry.open_registry(self.root) as connection:
+            adapter_id = workflow_adapter.register_adapter(connection, {
+                "workflow_profile_id": self.profile_id,
+                "adapter_name": "FFLF binding",
+                "adapter_version": "1",
+                "bindings": {
+                    **self.bindings(),
+                    "last_reference_image": {"node_id": "6", "input": "image"},
+                },
+            })["adapter_id"]
+            case_id = "benchmark_reference_following_v1"
+            connection.execute(
+                """INSERT INTO benchmark_case_asset_requirements
+                       (case_version_id,role,kind,minimum_count,description)
+                   VALUES (?,'last_reference_image','image',1,'종료 이미지')""",
+                (case_id,),
+            )
+            for role in ("reference_image", "last_reference_image"):
+                upload = self.root / f"{role}.png"
+                upload.write_bytes(b"\x89PNG\r\n\x1a\n" + role.encode("utf-8"))
+                model_test_assets.save_and_link(self.root, connection, {
+                    "case_version_id": case_id,
+                    "role": role,
+                    "upload_path": str(upload),
+                })
+        session_id = model_test_registry.create_session(self.root, {
+            "model_id": self.model_id,
+            "workflow_profile_id": self.profile_id,
+            "adapter_id": adapter_id,
+            "suite_id": model_test_registry.DEFAULT_SUITE_ID,
+            "repetitions": 1,
+        })["session_id"]
+        with model_test_registry.open_registry(self.root) as connection:
+            session = connection.execute(
+                "SELECT * FROM test_sessions WHERE session_id=?", (session_id,)
+            ).fetchone()
+            result = workflow_adapter.compile_case(connection, session, case_id)
+        self.assertEqual("ready", result["status"])
+        self.assertEqual(
+            ["reference_image", "last_reference_image"],
+            [asset["role"] for asset in result["assets"]],
+        )
+        self.assertEqual(
+            ["5", "6"],
+            [asset["binding"]["node_id"] for asset in result["assets"]],
+        )
+        self.assertIn("6", result["compiled_workflow"])
+        self.assertEqual(["6", 0], result["compiled_workflow"]["7"]["inputs"]["last_frame"])
 
     def test_changed_workflow_is_blocked_by_registered_hash(self):
         self.register_adapter()

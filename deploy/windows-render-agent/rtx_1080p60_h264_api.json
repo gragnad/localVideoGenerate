@@ -1,0 +1,94 @@
+{
+  "2": {
+    "inputs": {
+      "resize_type": "target dimensions",
+      "resize_type.width": 1920,
+      "resize_type.height": 1080,
+      "quality": "ULTRA",
+      "images": [
+        "14",
+        0
+      ]
+    },
+    "class_type": "RTXVideoSuperResolution",
+    "_meta": {
+      "title": "RTX Video Super Resolution"
+    }
+  },
+  "7": {
+    "inputs": {
+      "video": "__H3_UPSCALE_VIDEO__",
+      "force_rate": 0,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 0,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "AnimateDiff"
+    },
+    "class_type": "VHS_LoadVideo",
+    "_meta": {
+      "title": "Load Video (Upload)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "frame_rate": 60,
+      "loop_count": 0,
+      "filename_prefix": "video/h3/upscale/1080p60",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "2",
+        0
+      ],
+      "audio": [
+        "7",
+        2
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine H264 1080p60"
+    }
+  },
+  "14": {
+    "inputs": {
+      "select_every_nth": 2,
+      "skip_first_images": 0,
+      "images": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "VHS_SelectEveryNthImage",
+    "_meta": {
+      "title": "Select Every Nth Image"
+    }
+  },
+  "17": {
+    "inputs": {
+      "ckpt_name": "rife49.pth",
+      "clear_cache_after_n_frames": 10,
+      "multiplier": 5,
+      "fast_mode": true,
+      "ensemble": true,
+      "scale_factor": 1,
+      "dtype": "float32",
+      "torch_compile": false,
+      "batch_size": 1,
+      "frames": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "RIFE VFI",
+    "_meta": {
+      "title": "RIFE VFI 24fps to 60fps"
+    }
+  }
+}

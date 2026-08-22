@@ -3,6 +3,7 @@ from __future__ import annotations
 """Model-neutral benchmark registry and test-session planning."""
 
 import hashlib
+import fcntl
 import json
 import os
 import re
@@ -14,17 +15,40 @@ from typing import Any
 
 import evaluation_db
 import model_test_assets
+import model_test_i2v
 import model_test_r2v
 import workflow_adapter
+from job_queue import now_iso, read_json
 
 PROFILE_KINDS = {"official_baseline", "controlled_variant", "optimized_variant"}
 DEFAULT_TEST_RESOLUTION = {"width": 768, "height": 432}
+H3_I2V_WORKFLOW_FILENAME = "(basic)video_minimax_h3_i2v_api.json"
+H3_I2V_TURBO8_WORKFLOW_FILENAME = (
+    "(basic)video_minimax_h3_i2v_turbo8step_api.json"
+)
+H3_I2V_TURBO8_FFLF_WORKFLOW_FILENAME = (
+    "(basic)video_minimax_h3_i2v_turbo8step_fflf_api.json"
+)
 TEST_RESOLUTION_PRESETS = (
     (512, 288), (768, 432), (832, 480), (960, 544), (1024, 576),
-    (1280, 704), (1344, 768), (1536, 864),
+    (1280, 704), (1280, 736), (1344, 768), (1536, 864),
 )
 DEFAULT_SUITE_ID = "video_model_diagnostic_v1"
 I2V_SUITE_ID = "video_model_diagnostic_i2v_fixed_anchor_v1"
+
+
+def is_legacy_ltx_identity(*values: Any) -> bool:
+    return "ltx" in " ".join(str(value or "") for value in values).lower()
+
+
+def is_legacy_ltx_model(model: Any) -> bool:
+    if not model:
+        return False
+    return is_legacy_ltx_identity(
+        *(model[key] for key in ("provider", "family", "display_name", "version"))
+    )
+
+
 DEFAULT_CASES = [
     ("empty_environment", "캐릭터 없는 환경", "environment", "smoke", "빈 공간의 구조와 조명을 유지하며 카메라가 천천히 전진한다.", ["캐릭터가 생성되지 않는다", "공간 구조가 유지된다"], ["인물의 임의 출현", "배경 구조의 순간 변경"]),
     ("single_identity", "단일 캐릭터 정체성", "character_identity", "diagnostic", "한 캐릭터가 고개를 돌리고 몇 걸음 이동하는 동안 외형과 의상을 유지한다.", ["얼굴과 의상 유지", "자연스러운 신체 이동"], ["외형 교체", "팔다리 변형"]),
@@ -258,6 +282,111 @@ def _validated_case_settings(contract_json: str, raw: Any) -> dict[str, Any]:
     return result
 
 
+def _validated_workflow_settings(
+    connection: sqlite3.Connection,
+    workflow_profile_id: str,
+    workflow_filename: str,
+    suite_id: str,
+    raw: Any,
+) -> dict[str, Any]:
+    if raw is None:
+        raw_values: dict[str, Any] = {}
+    elif isinstance(raw, dict):
+        raw_values = dict(raw)
+    else:
+        raise ValueError("세션 워크플로우 설정 형식이 올바르지 않습니다.")
+    unknown = set(raw_values) - {"sol_attn"}
+    if unknown:
+        raise ValueError(
+            "지원하지 않는 세션 워크플로우 설정입니다: "
+            + ", ".join(sorted(unknown))
+        )
+
+    supports_sol_attn = (
+        model_test_r2v.is_r2v_suite_id(suite_id)
+        and workflow_filename == model_test_r2v.R2V_PINT8_WORKFLOW_FILENAME
+    )
+    if not supports_sol_attn:
+        if raw_values:
+            raise ValueError(
+                "Patch Sol-Attn 설정은 PINT8 + Sol-Attn R2V 워크플로우에서만 사용할 수 있습니다."
+            )
+        return {}
+
+    workflow, _ = workflow_adapter.load_api_workflow(
+        connection, workflow_profile_id
+    )
+    return {
+        "sol_attn": workflow_adapter.normalize_sol_attn_settings(
+            workflow, raw_values.get("sol_attn")
+        )
+    }
+
+
+def sol_attn_defaults_for_profile(
+    connection: sqlite3.Connection,
+    profile: Any,
+) -> dict[str, Any] | None:
+    """Read the effective Sol-Attn values from one registered PINT8 graph."""
+    profile_data = dict(profile) if not isinstance(profile, str) else None
+    if profile_data is None:
+        row = connection.execute(
+            "SELECT * FROM workflow_profiles WHERE workflow_profile_id=?",
+            (profile,),
+        ).fetchone()
+        if not row:
+            return None
+        profile_data = dict(row)
+    if (
+        str(profile_data.get("workflow_filename") or "")
+        != model_test_r2v.R2V_PINT8_WORKFLOW_FILENAME
+    ):
+        return None
+    workflow, _ = workflow_adapter.load_api_workflow(
+        connection, str(profile_data["workflow_profile_id"])
+    )
+    return workflow_adapter.normalize_sol_attn_settings(workflow)
+
+
+def effective_session_workflow_settings(
+    connection: sqlite3.Connection,
+    session: Any,
+    *,
+    sol_attn_defaults: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return stored settings, filling pre-v10 PINT8 sessions from the graph."""
+    data = dict(session)
+    if isinstance(data.get("workflow_settings"), dict):
+        stored = dict(data["workflow_settings"])
+    else:
+        try:
+            stored = json.loads(data.get("workflow_settings_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            stored = {}
+    if not isinstance(stored, dict):
+        stored = {}
+    if stored:
+        return stored
+
+    workflow_filename = str(data.get("workflow_filename") or "")
+    profile_id = str(data.get("workflow_profile_id") or "")
+    if not workflow_filename and profile_id:
+        profile = connection.execute(
+            "SELECT workflow_filename FROM workflow_profiles WHERE workflow_profile_id=?",
+            (profile_id,),
+        ).fetchone()
+        workflow_filename = str(profile["workflow_filename"] or "") if profile else ""
+    if workflow_filename != model_test_r2v.R2V_PINT8_WORKFLOW_FILENAME:
+        return {}
+    defaults = sol_attn_defaults
+    if defaults is None:
+        try:
+            defaults = sol_attn_defaults_for_profile(connection, profile_id)
+        except (OSError, ValueError):
+            defaults = None
+    return {"sol_attn": dict(defaults)} if defaults is not None else {}
+
+
 def _token(value: Any, label: str) -> str:
     result = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(value or "").strip()).strip("_.-").lower()
     if not result:
@@ -407,12 +536,26 @@ def ensure_i2v_suite(connection: sqlite3.Connection) -> None:
 
 
 def open_registry(root: Path) -> sqlite3.Connection:
-    connection = evaluation_db.connect(root / evaluation_db.DEFAULT_DB_PATH)
-    evaluation_db.initialize(connection)
-    ensure_default_suite(connection)
-    ensure_i2v_suite(connection)
-    model_test_r2v.ensure_suites(connection)
-    connection.commit()
+    db_path = root / evaluation_db.DEFAULT_DB_PATH
+    lock_path = db_path.parent / ".registry-init.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = None
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            connection = evaluation_db.connect(db_path)
+            evaluation_db.initialize(connection)
+            ensure_default_suite(connection)
+            ensure_i2v_suite(connection)
+            model_test_r2v.ensure_suites(connection)
+            model_test_r2v.ensure_dragon_season_1_suite(root, connection)
+            model_test_r2v.ensure_registered_project_suites(root, connection)
+            model_test_i2v.ensure_registered_project_suites(root, connection)
+            connection.commit()
+        except Exception:
+            if connection is not None:
+                connection.close()
+            raise
     return connection
 
 
@@ -421,6 +564,8 @@ def register_model(root: Path, data: dict[str, Any]) -> dict[str, Any]:
     family = _text(data.get("family"), "모델 제품군", maximum=200)
     display_name = _text(data.get("display_name"), "모델 이름", maximum=200)
     version = _text(data.get("version"), "모델 버전", required=False, maximum=100)
+    if is_legacy_ltx_identity(provider, family, display_name, version):
+        raise ValueError("LTX는 과거 검수 데이터 열람 전용이며 새 모델로 등록할 수 없습니다.")
     model_id = _token(data.get("model_id") or f"{provider}_{family}_{version or display_name}", "모델 ID")
     with open_registry(root) as connection:
         connection.execute(
@@ -439,6 +584,9 @@ def available_workflows(workflow_dir: Path) -> list[dict[str, Any]]:
     if not workflow_dir.is_dir():
         return rows
     for path in sorted(workflow_dir.glob("*.json"), key=lambda item: item.name.lower()):
+        lowered = path.name.lower()
+        if "ltx" in lowered or "msr" in lowered:
+            continue
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -449,7 +597,11 @@ def available_workflows(workflow_dir: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def register_workflow(root: Path, workflow_dir: Path, data: dict[str, Any]) -> dict[str, Any]:
+def _register_workflow(
+    connection: sqlite3.Connection,
+    workflow_dir: Path,
+    data: dict[str, Any],
+) -> dict[str, Any]:
     model_id = _text(data.get("model_id"), "모델")
     raw_filename = _text(data.get("workflow_filename"), "워크플로우 파일")
     filename = Path(raw_filename).name
@@ -469,17 +621,27 @@ def register_workflow(root: Path, workflow_dir: Path, data: dict[str, Any]) -> d
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     workflow_format = "comfyui_ui" if isinstance(payload, dict) and isinstance(payload.get("nodes"), list) else "comfyui_api"
     profile_id = f"workflow_{hashlib.sha256(f'{model_id}:{kind}:{digest}'.encode()).hexdigest()[:24]}"
-    with open_registry(root) as connection:
-        if not connection.execute("SELECT 1 FROM models WHERE model_id=?", (model_id,)).fetchone():
-            raise ValueError("등록된 모델을 찾을 수 없습니다.")
-        connection.execute(
-            """INSERT OR IGNORE INTO workflow_profiles
-               (workflow_profile_id,model_id,name,profile_kind,workflow_filename,workflow_path,
-                workflow_sha256,workflow_format,defaults_json,source_url,notes)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (profile_id, model_id, _text(data.get("name") or filename, "워크플로우 이름", maximum=200), kind, filename, str(path), digest, workflow_format, _json(dict(data.get("defaults") or {})), _text(data.get("source_url"), "공식 출처", required=False, maximum=1000) or None, _text(data.get("notes"), "메모", required=False)),
-        )
+    model = connection.execute(
+        "SELECT provider,family,display_name,version FROM models WHERE model_id=?",
+        (model_id,),
+    ).fetchone()
+    if not model:
+        raise ValueError("등록된 모델을 찾을 수 없습니다.")
+    if is_legacy_ltx_model(model):
+        raise ValueError("LTX 모델 정보는 과거 검수 데이터 열람 전용입니다.")
+    connection.execute(
+        """INSERT OR IGNORE INTO workflow_profiles
+           (workflow_profile_id,model_id,name,profile_kind,workflow_filename,workflow_path,
+            workflow_sha256,workflow_format,defaults_json,source_url,notes)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (profile_id, model_id, _text(data.get("name") or filename, "워크플로우 이름", maximum=200), kind, filename, str(path), digest, workflow_format, _json(dict(data.get("defaults") or {})), _text(data.get("source_url"), "공식 출처", required=False, maximum=1000) or None, _text(data.get("notes"), "메모", required=False)),
+    )
     return {"workflow_profile_id": profile_id, "workflow_sha256": digest, "workflow_format": workflow_format}
+
+
+def register_workflow(root: Path, workflow_dir: Path, data: dict[str, Any]) -> dict[str, Any]:
+    with open_registry(root) as connection:
+        return _register_workflow(connection, workflow_dir, data)
 
 
 def create_session(root: Path, data: dict[str, Any]) -> dict[str, Any]:
@@ -499,28 +661,40 @@ def create_session(root: Path, data: dict[str, Any]) -> dict[str, Any]:
     with open_registry(root) as connection:
         profile = connection.execute("SELECT model_id,workflow_filename FROM workflow_profiles WHERE workflow_profile_id=?", (workflow_profile_id,)).fetchone()
         model = connection.execute("SELECT provider,family,display_name,version FROM models WHERE model_id=?", (model_id,)).fetchone()
+        if model and is_legacy_ltx_model(model):
+            raise ValueError("LTX 테스트는 과거 검수 데이터 열람 전용이며 새 세션을 만들 수 없습니다.")
+        identity = " ".join(str(model[key] or "") for key in ("provider", "family", "display_name", "version")).lower() if model else ""
         if output_width and model:
-            identity = " ".join(str(model[key] or "") for key in ("provider", "family", "display_name", "version")).lower()
             if "minimax" in identity and re.search(r"(^|[^a-z0-9])h3([^a-z0-9]|$)", identity):
                 if output_width % 32 or output_height % 32:
                     raise ValueError("MiniMax H3 테스트 해상도는 가로·세로 모두 32의 배수여야 합니다.")
-        if suite_id in model_test_r2v.R2V_SUITE_IDS:
+        if model_test_r2v.is_r2v_suite_id(suite_id):
             if not model or "minimax" not in identity or not re.search(r"(^|[^a-z0-9])h3([^a-z0-9]|$)", identity):
                 raise ValueError("R2V 전용 테스트 세트는 MiniMax H3 모델만 사용할 수 있습니다.")
-            if (output_width, output_height) != (832, 480):
-                raise ValueError("MiniMax H3 R2V 테스트는 고정 해상도 832×480을 사용합니다.")
+            if (output_width, output_height) not in model_test_r2v.R2V_TEST_RESOLUTIONS:
+                raise ValueError(
+                    "MiniMax H3 R2V 테스트 해상도는 608×352, 736×416, "
+                    "832×480 또는 1280×736이어야 합니다."
+                )
         if not profile:
             raise ValueError("등록된 워크플로우를 찾을 수 없습니다.")
         if profile["model_id"] != model_id:
             raise ValueError("워크플로우가 선택한 모델에 속하지 않습니다.")
-        if suite_id in model_test_r2v.R2V_SUITE_IDS and profile["workflow_filename"] != model_test_r2v.R2V_WORKFLOW_FILENAME:
+        if model_test_r2v.is_r2v_suite_id(suite_id) and not model_test_r2v.is_r2v_workflow_filename(profile["workflow_filename"]):
             raise ValueError("R2V 전용 테스트는 MiniMax H3 R2V 워크플로우를 선택해야 합니다.")
         adapter = connection.execute("SELECT workflow_profile_id FROM workflow_adapters WHERE adapter_id=?", (adapter_id,)).fetchone()
         if not adapter or adapter["workflow_profile_id"] != workflow_profile_id:
             raise ValueError("검증된 워크플로우 어댑터가 선택한 프로필과 일치하지 않습니다.")
         if not connection.execute("SELECT 1 FROM benchmark_suites WHERE suite_id=? AND active=1", (suite_id,)).fetchone():
             raise ValueError("활성 테스트 세트를 찾을 수 없습니다.")
-        connection.execute("INSERT INTO test_sessions(session_id,suite_id,model_id,workflow_profile_id,adapter_id,repetitions,output_width,output_height,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (session_id, suite_id, model_id, workflow_profile_id, adapter_id, repetitions, output_width, output_height, _text(data.get("notes"), "세션 메모", required=False), now, now))
+        workflow_settings = _validated_workflow_settings(
+            connection,
+            workflow_profile_id,
+            str(profile["workflow_filename"]),
+            suite_id,
+            data.get("workflow_settings"),
+        )
+        connection.execute("INSERT INTO test_sessions(session_id,suite_id,model_id,workflow_profile_id,adapter_id,repetitions,output_width,output_height,workflow_settings_json,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (session_id, suite_id, model_id, workflow_profile_id, adapter_id, repetitions, output_width, output_height, _json(workflow_settings), _text(data.get("notes"), "세션 메모", required=False), now, now))
         cases = connection.execute("""SELECT s.case_version_id,s.ordering,v.contract_json FROM suite_cases s JOIN benchmark_case_versions v ON v.case_version_id=s.case_version_id WHERE s.suite_id=? AND s.enabled=1 ORDER BY s.ordering""", (suite_id,)).fetchall()
         requested_case_settings = data.get("case_settings") or {}
         if not isinstance(requested_case_settings, dict):
@@ -528,7 +702,7 @@ def create_session(root: Path, data: dict[str, Any]) -> dict[str, Any]:
         for row in cases:
             settings = _validated_case_settings(row["contract_json"], requested_case_settings.get(row["case_version_id"]))
             connection.execute("INSERT INTO test_session_cases(session_id,case_version_id,ordering,planned_runs,settings_json) VALUES (?,?,?,?,?)", (session_id, row["case_version_id"], row["ordering"], repetitions, _json(settings)))
-    return {"session_id": session_id, "status": "planned", "case_count": len(cases), "planned_run_count": len(cases) * repetitions, "resolution": {"width": output_width, "height": output_height} if output_width else None}
+    return {"session_id": session_id, "status": "planned", "case_count": len(cases), "planned_run_count": len(cases) * repetitions, "resolution": {"width": output_width, "height": output_height} if output_width else None, "workflow_settings": workflow_settings}
 
 
 
@@ -553,6 +727,12 @@ def create_followup_session(root: Path, data: dict[str, Any]) -> dict[str, Any]:
         ).fetchone()
         if not source:
             raise FileNotFoundError("원본 테스트 세션을 찾을 수 없습니다.")
+        source_model = connection.execute(
+            "SELECT provider,family,display_name,version FROM models WHERE model_id=?",
+            (source["model_id"],),
+        ).fetchone()
+        if source_model and is_legacy_ltx_model(source_model):
+            raise ValueError("LTX 검수 세션은 보존용이므로 후속 재시험을 만들 수 없습니다.")
         available = {
             row["case_version_id"]: dict(row)
             for row in connection.execute(
@@ -571,8 +751,9 @@ def create_followup_session(root: Path, data: dict[str, Any]) -> dict[str, Any]:
         connection.execute(
             """INSERT INTO test_sessions(
                    session_id,suite_id,model_id,workflow_profile_id,adapter_id,status,
-                   repetitions,output_width,output_height,notes,created_at,updated_at
-               ) VALUES (?,?,?,?,?,'planned',?,?,?,?,?,?)""",
+                   repetitions,output_width,output_height,workflow_settings_json,
+                   notes,created_at,updated_at
+               ) VALUES (?,?,?,?,?,'planned',?,?,?,?,?,?,?)""",
             (
                 session_id,
                 source["suite_id"],
@@ -582,6 +763,7 @@ def create_followup_session(root: Path, data: dict[str, Any]) -> dict[str, Any]:
                 repetitions,
                 source["output_width"],
                 source["output_height"],
+                source["workflow_settings_json"],
                 notes,
                 now,
                 now,
@@ -625,10 +807,16 @@ def _restore_staged_paths(moved: list[tuple[Path, Path]]) -> None:
 def delete_session(root: Path, session_id: str) -> dict[str, Any]:
     """Remove a terminal test session and its dedicated local artifacts."""
     session_id = _text(session_id, "테스트 세션 ID", maximum=200)
-    active_statuses = {"queued", "preparing", "uploading", "submitting", "comfy_queued", "running"}
+    active_statuses = {
+        "queued", "preparing", "uploading", "submitting", "comfy_queued", "running",
+        "ai_review_queued", "switching_to_qwen_review", "ai_reviewing",
+        "review_cancel_requested",
+    }
     root = root.resolve()
-    jobs_root = (root / "jobs").resolve()
-    batches_root = (root / "runtime" / "batches").resolve()
+    h3_jobs_root = (root / "runtime" / "h3" / "jobs").resolve()
+    h3_outputs_root = (root / "runtime" / "h3" / "outputs").resolve()
+    h3_test_queues_root = (root / "runtime" / "h3" / "test_queues").resolve()
+    review_queues_root = (root / "runtime" / "model_test_review_queue").resolve()
     comfy_output_root = Path(
         os.environ.get("COMFY_OUTPUT_DIR", str(Path.home() / "ai-workspace/apps/ComfyUI/output"))
     ).expanduser().resolve()
@@ -636,7 +824,12 @@ def delete_session(root: Path, session_id: str) -> dict[str, Any]:
     trash_root: Path | None = None
     with open_registry(root) as connection:
         try:
-            session = connection.execute("SELECT status FROM test_sessions WHERE session_id=?", (session_id,)).fetchone()
+            session = connection.execute(
+                """SELECT s.status,m.provider,m.family,m.display_name,m.version
+                     FROM test_sessions s JOIN models m ON m.model_id=s.model_id
+                    WHERE s.session_id=?""",
+                (session_id,),
+            ).fetchone()
             if not session:
                 return {
                     "session_id": session_id,
@@ -644,10 +837,12 @@ def delete_session(root: Path, session_id: str) -> dict[str, Any]:
                     "deleted_review_count": 0,
                     "deleted_job_count": 0,
                     "deleted_output_count": 0,
-                    "deleted_batch_count": 0,
+                    "deleted_review_queue_count": 0,
                     "files_preserved": False,
                     "already_deleted": True,
                 }
+            if is_legacy_ltx_model(session):
+                raise ValueError("LTX 검수 세션은 보존 데이터이므로 삭제할 수 없습니다.")
             children = [row[0] for row in connection.execute(
                 "SELECT child_session_id FROM test_session_lineage WHERE parent_session_id=? ORDER BY child_session_id", (session_id,)
             )]
@@ -659,25 +854,119 @@ def delete_session(root: Path, session_id: str) -> dict[str, Any]:
                    WHERE sr.session_id=?""",
                 (session_id,),
             )]
+            session_status = str(session["status"] or "")
+            reconciled_h3_runs = 0
+            terminal_statuses = {"completed", "failed", "cancelled"}
+            for run in runs:
+                if str(run["status"] or "") not in active_statuses:
+                    continue
+                job_id = str(run.get("job_id") or "").strip()
+                if not job_id or Path(job_id).name != job_id:
+                    continue
+                h3_status = str(
+                    (read_json(h3_jobs_root / job_id / "status.json", {}) or {}).get("status")
+                    or ""
+                )
+                if h3_status not in terminal_statuses:
+                    continue
+                run["status"] = h3_status
+                connection.execute(
+                    "UPDATE generation_runs SET status=? WHERE run_id=?",
+                    (h3_status, run["run_id"]),
+                )
+                reconciled_h3_runs += 1
+            if reconciled_h3_runs and runs and all(
+                str(run["status"] or "") in terminal_statuses for run in runs
+            ):
+                session_status = (
+                    "completed"
+                    if all(str(run["status"] or "") == "completed" for run in runs)
+                    else "completed_with_failures"
+                )
+                connection.execute(
+                    "UPDATE test_sessions SET status=?,updated_at=? WHERE session_id=?",
+                    (session_status, now_iso(), session_id),
+                )
+            review_session_statuses = {
+                "ai_review_queued",
+                "switching_to_qwen_review",
+                "ai_reviewing",
+                "review_cancel_requested",
+            }
+            active_review_queue_exists = False
+            for directory in review_queues_root.glob("review_*"):
+                request = read_json(directory / "request.json", {}) or {}
+                if str(request.get("session_id") or "") != session_id:
+                    continue
+                review_status = str(
+                    (read_json(directory / "status.json", {}) or {}).get("status")
+                    or ""
+                )
+                if review_status in {
+                    "queued", "claimed", "preparing", "reviewing",
+                    "cancel_requested",
+                }:
+                    active_review_queue_exists = True
+                    break
+            all_generation_terminal = not runs or all(
+                str(run["status"] or "") in terminal_statuses for run in runs
+            )
+            if (
+                session_status in review_session_statuses
+                and not active_review_queue_exists
+                and all_generation_terminal
+            ):
+                session_status = (
+                    "completed"
+                    if all(str(run["status"] or "") == "completed" for run in runs)
+                    else "completed_with_failures"
+                )
+                connection.execute(
+                    "UPDATE test_sessions SET status=?,updated_at=? WHERE session_id=?",
+                    (session_status, now_iso(), session_id),
+                )
             active = [row["run_id"] for row in runs if str(row["status"]) in active_statuses]
-            if str(session["status"]) in active_statuses or active:
+            if session_status in active_statuses or active:
                 raise RuntimeError("실행 중이거나 큐 대기 중인 테스트 세션은 삭제할 수 없습니다. 먼저 작업 종료 후 삭제하세요.")
 
-            batch_row = connection.execute(
-                "SELECT batch_id FROM test_session_batches WHERE session_id=?", (session_id,)
-            ).fetchone()
             targets: set[Path] = set()
             job_dirs: set[Path] = set()
+            queue_dirs: set[Path] = set()
+            review_queue_dirs: set[Path] = set()
             output_files: set[Path] = set()
+            for directory in review_queues_root.glob("review_*"):
+                request = read_json(directory / "request.json", {}) or {}
+                if str(request.get("session_id") or "") != session_id:
+                    continue
+                review_status = str(
+                    (read_json(directory / "status.json", {}) or {}).get("status") or ""
+                )
+                if review_status in {"queued", "claimed", "preparing", "reviewing", "cancel_requested"}:
+                    raise RuntimeError("실행 중이거나 큐 대기 중인 AI 검수는 먼저 중단해야 합니다.")
+                review_queue_dirs.add(directory.resolve())
             for run in runs:
                 job_id = str(run.get("job_id") or "").strip()
                 if job_id:
                     if Path(job_id).name != job_id:
                         raise RuntimeError(f"안전하지 않은 job ID가 기록되어 삭제를 중단했습니다: {job_id}")
-                    job_dir = (jobs_root / job_id).resolve()
-                    if not _is_within(job_dir, jobs_root):
+                    job_dir = (h3_jobs_root / job_id).resolve()
+                    if not _is_within(job_dir, h3_jobs_root):
                         raise RuntimeError(f"허용되지 않은 job 경로라 삭제를 중단했습니다: {job_dir}")
+                    if not (job_dir / "request.json").is_file():
+                        raise RuntimeError(
+                            "H3 작업 디렉터리가 없는 과거 테스트 세션은 데이터 보존을 위해 "
+                            "이 화면에서 삭제하지 않습니다."
+                        )
                     job_dirs.add(job_dir)
+                    request = read_json(job_dir / "request.json", {}) or {}
+                    test_queue_id = str(request.get("test_queue_id") or "").strip()
+                    if test_queue_id:
+                        if Path(test_queue_id).name != test_queue_id:
+                            raise RuntimeError(f"안전하지 않은 H3 테스트 큐 ID라 삭제를 중단했습니다: {test_queue_id}")
+                        queue_dir = (h3_test_queues_root / test_queue_id).resolve()
+                        if not _is_within(queue_dir, h3_test_queues_root):
+                            raise RuntimeError(f"허용되지 않은 H3 테스트 큐 경로라 삭제를 중단했습니다: {queue_dir}")
+                        queue_dirs.add(queue_dir)
                 recorded_outputs: list[str] = []
                 if run.get("output_path"):
                     recorded_outputs.append(str(run["output_path"]))
@@ -694,21 +983,14 @@ def delete_session(root: Path, session_id: str) -> dict[str, Any]:
                         recorded_outputs.append(str(comfy_output_root / str(output.get("subfolder") or "") / str(output["filename"])))
                 for raw_path in recorded_outputs:
                     path = Path(raw_path).expanduser().resolve()
-                    if not (_is_within(path, comfy_output_root) or _is_within(path, jobs_root)):
+                    if not (_is_within(path, comfy_output_root) or _is_within(path, h3_jobs_root) or _is_within(path, h3_outputs_root)):
                         raise RuntimeError(f"허용되지 않은 출력 경로라 삭제를 중단했습니다: {path}")
                     output_files.add(path)
 
             targets.update(job_dirs)
+            targets.update(queue_dirs)
+            targets.update(review_queue_dirs)
             targets.update(output_files)
-            batch_dir: Path | None = None
-            if batch_row:
-                batch_id = str(batch_row["batch_id"] or "").strip()
-                if Path(batch_id).name != batch_id:
-                    raise RuntimeError(f"안전하지 않은 batch ID가 기록되어 삭제를 중단했습니다: {batch_id}")
-                batch_dir = (batches_root / batch_id).resolve()
-                if not _is_within(batch_dir, batches_root):
-                    raise RuntimeError(f"허용되지 않은 batch 경로라 삭제를 중단했습니다: {batch_dir}")
-                targets.add(batch_dir)
 
             existing = sorted((path for path in targets if path.exists()), key=lambda path: len(path.parts))
             independent = [path for path in existing if not any(parent in path.parents for parent in existing)]
@@ -749,18 +1031,65 @@ def delete_session(root: Path, session_id: str) -> dict[str, Any]:
         "deleted_review_count": review_count,
         "deleted_job_count": sum(1 for path in job_dirs if path in existing),
         "deleted_output_count": sum(1 for path in output_files if path in existing and not any(job in path.parents for job in job_dirs)),
-        "deleted_batch_count": int(bool(batch_dir and batch_dir in existing)),
+        "deleted_h3_queue_count": sum(1 for path in queue_dirs if path in existing),
+        "deleted_review_queue_count": sum(
+            1 for path in review_queue_dirs if path in existing
+        ),
         "files_preserved": False,
     }
 
-def ensure_h3_r2v_adapter(root: Path, workflow_dir: Path) -> dict[str, Any] | None:
-    workflow_path = workflow_dir / model_test_r2v.R2V_WORKFLOW_FILENAME
-    if not workflow_path.is_file():
+def _ensure_h3_r2v_adapter(
+    connection: sqlite3.Connection,
+    workflow_dir: Path,
+) -> dict[str, Any] | None:
+    variants = (
+        {
+            "filename": model_test_r2v.R2V_WORKFLOW_FILENAME,
+            "name": "MiniMax H3 R2V API baseline",
+            "profile_kind": "official_baseline",
+            "notes": "R2V 모델 테스트 및 H3 생성용 다중 Reference-to-Video 기준 워크플로우",
+            "adapter_name": "MiniMax H3 R2V multi-reference",
+            "loader_node_ids": ["139", "137"],
+            "loader_template_node_id": "137",
+            "max_slots": 9,
+        },
+        {
+            "filename": model_test_r2v.R2V_PINT8_WORKFLOW_FILENAME,
+            "name": "MiniMax H3 R2V PINT8 + Sol-Attn",
+            "profile_kind": "optimized_variant",
+            "notes": "PINT8 UNet, NVFP4/AWQ CLIP과 Sol-Attn을 사용하는 H3 R2V 최적화 워크플로우",
+            "adapter_name": "MiniMax H3 R2V PINT8 + Sol-Attn multi-reference",
+            "loader_node_ids": ["139", "137", "143"],
+            "loader_template_node_id": "137",
+            "max_slots": 9,
+        },
+        {
+            "filename": model_test_r2v.R2V_UPDATE_ATTN_WORKFLOW_FILENAME,
+            "name": "MiniMax H3 R2V Update Attention",
+            "profile_kind": "optimized_variant",
+            "notes": (
+                "INT8 ConvRot UNet, NVFP4/AWQ CLIP과 Comfy Kitchen "
+                "attention backend를 사용하는 기본 H3 R2V 워크플로우"
+            ),
+            "adapter_name": (
+                "MiniMax H3 R2V Update Attention multi-reference"
+            ),
+            "adapter_version": "2",
+            "loader_node_ids": ["137", "139", "145", "149", "147"],
+            "loader_template_node_id": "137",
+            "max_slots": 9,
+        },
+    )
+    available_variants = [
+        variant
+        for variant in variants
+        if (workflow_dir / str(variant["filename"])).is_file()
+    ]
+    if not available_variants:
         return None
-    with open_registry(root) as connection:
-        candidates = [dict(row) for row in connection.execute(
-            "SELECT model_id,provider,family,display_name,version FROM models"
-        )]
+    candidates = [dict(row) for row in connection.execute(
+        "SELECT model_id,provider,family,display_name,version FROM models"
+    )]
     h3_models = []
     for model in candidates:
         identity = " ".join(str(model.get(key) or "") for key in ("provider", "family", "display_name", "version")).lower()
@@ -768,18 +1097,18 @@ def ensure_h3_r2v_adapter(root: Path, workflow_dir: Path) -> dict[str, Any] | No
             h3_models.append(model)
     result = None
     for model in h3_models:
-        profile = register_workflow(root, workflow_dir, {
-            "model_id": model["model_id"],
-            "workflow_filename": model_test_r2v.R2V_WORKFLOW_FILENAME,
-            "name": "MiniMax H3 R2V API baseline",
-            "profile_kind": "official_baseline",
-            "notes": "10 모델 테스트 전용 다중 Reference-to-Video 기준 워크플로우",
-        })
-        with open_registry(root) as connection:
+        for variant in available_variants:
+            profile = _register_workflow(connection, workflow_dir, {
+                "model_id": model["model_id"],
+                "workflow_filename": variant["filename"],
+                "name": variant["name"],
+                "profile_kind": variant["profile_kind"],
+                "notes": variant["notes"],
+            })
             result = workflow_adapter.register_adapter(connection, {
                 "workflow_profile_id": profile["workflow_profile_id"],
-                "adapter_name": "MiniMax H3 R2V multi-reference",
-                "adapter_version": "1",
+                "adapter_name": variant["adapter_name"],
+                "adapter_version": str(variant.get("adapter_version") or "1"),
                 "bindings": {
                     "prompt": {"node_id": "138", "input": "value"},
                     "seed": {"node_id": "129", "input": "noise_seed"},
@@ -791,25 +1120,199 @@ def ensure_h3_r2v_adapter(root: Path, workflow_dir: Path) -> dict[str, Any] | No
                 "multi_reference": {
                     "conditioning_node_id": "136",
                     "input_prefix": "ref_images.ref_image_",
-                    "loader_node_ids": ["139", "137"],
-                    "loader_template_node_id": "137",
+                    "loader_node_ids": variant["loader_node_ids"],
+                    "loader_template_node_id": variant["loader_template_node_id"],
+                    **(
+                        {
+                            "conditioning_source_node_ids": variant[
+                                "conditioning_source_node_ids"
+                            ]
+                        }
+                        if variant.get("conditioning_source_node_ids")
+                        else {}
+                    ),
+                    **(
+                        {
+                            "conditioning_source_template_node_id": variant[
+                                "conditioning_source_template_node_id"
+                            ],
+                            "conditioning_source_image_input": variant.get(
+                                "conditioning_source_image_input", "image"
+                            ),
+                        }
+                        if variant.get("conditioning_source_template_node_id")
+                        else {}
+                    ),
                     "loader_input": "image",
-                    "max_slots": 9,
+                    "max_slots": variant["max_slots"],
                 },
                 "defaults": {"width": 832, "height": 480, "fps": 24},
             })
     return result
 
 
-def dashboard(root: Path, workflow_dir: Path) -> dict[str, Any]:
-    ensure_h3_r2v_adapter(root, workflow_dir)
+def ensure_h3_r2v_adapter(root: Path, workflow_dir: Path) -> dict[str, Any] | None:
     with open_registry(root) as connection:
+        return _ensure_h3_r2v_adapter(connection, workflow_dir)
+
+
+def _ensure_h3_i2v_adapter(
+    connection: sqlite3.Connection,
+    workflow_dir: Path,
+) -> dict[str, Any] | None:
+    """Register available production H3 first-frame I2V graphs."""
+    workflow_specs = [
+        {
+            "filename": H3_I2V_WORKFLOW_FILENAME,
+            "name": "MiniMax H3 I2V API baseline",
+            "profile_kind": "official_baseline",
+            "notes": "첫 프레임 한 장을 사용하는 MiniMax H3 Image-to-Video 운영 워크플로우",
+            "adapter_name": "MiniMax H3 first-frame I2V",
+            "adapter_version": "1",
+        },
+        {
+            "filename": H3_I2V_TURBO8_WORKFLOW_FILENAME,
+            "name": "MiniMax H3 I2V Turbo 8-step",
+            "profile_kind": "optimized_variant",
+            "notes": (
+                "MiniMax H3 Turbo LoRA v4-600과 전용 sampler를 사용하는 "
+                "8-step I2V 운영 워크플로우"
+            ),
+            "adapter_name": "MiniMax H3 Turbo 8-step I2V",
+            "adapter_version": "1",
+        },
+        {
+            "filename": H3_I2V_TURBO8_FFLF_WORKFLOW_FILENAME,
+            "name": "MiniMax H3 I2V Turbo 8-step FFLF",
+            "profile_kind": "optimized_variant",
+            "notes": (
+                "MiniMax H3 Turbo LoRA v4-600과 전용 sampler를 사용하며 "
+                "시작·종료 프레임 두 장을 고정하는 8-step FFLF 운영 워크플로우"
+            ),
+            "adapter_name": "MiniMax H3 Turbo 8-step FFLF",
+            "adapter_version": "1",
+            "last_reference_image_node_id": "147",
+        },
+    ]
+    available_specs = [
+        spec
+        for spec in workflow_specs
+        if (workflow_dir / str(spec["filename"])).is_file()
+    ]
+    if not available_specs:
+        return None
+    candidates = [dict(row) for row in connection.execute(
+        "SELECT model_id,provider,family,display_name,version FROM models"
+    )]
+    h3_models = []
+    for model in candidates:
+        identity = " ".join(
+            str(model.get(key) or "")
+            for key in ("provider", "family", "display_name", "version")
+        ).lower()
+        if "minimax" in identity and re.search(
+            r"(^|[^a-z0-9])h3([^a-z0-9]|$)", identity
+        ):
+            h3_models.append(model)
+    result = None
+    for model in h3_models:
+        for spec in available_specs:
+            profile = _register_workflow(connection, workflow_dir, {
+                "model_id": model["model_id"],
+                "workflow_filename": spec["filename"],
+                "name": spec["name"],
+                "profile_kind": spec["profile_kind"],
+                "notes": spec["notes"],
+            })
+            bindings = {
+                "prompt": {"node_id": "133", "input": "prompt"},
+                "seed": {"node_id": "131", "input": "noise_seed"},
+                "width": {"node_id": "137", "input": "value"},
+                "height": {"node_id": "138", "input": "value"},
+                "duration_seconds": {"node_id": "135", "input": "value"},
+                "filename_prefix": {"node_id": "92", "input": "filename_prefix"},
+                "reference_image": {"node_id": "114", "input": "image"},
+            }
+            if spec.get("last_reference_image_node_id"):
+                bindings["last_reference_image"] = {
+                    "node_id": spec["last_reference_image_node_id"],
+                    "input": "image",
+                }
+            result = workflow_adapter.register_adapter(connection, {
+                "workflow_profile_id": profile["workflow_profile_id"],
+                "adapter_name": spec["adapter_name"],
+                "adapter_version": spec["adapter_version"],
+                "bindings": bindings,
+                "defaults": {"width": 1280, "height": 704, "fps": 24},
+            })
+    return result
+
+
+def ensure_h3_i2v_adapter(root: Path, workflow_dir: Path) -> dict[str, Any] | None:
+    with open_registry(root) as connection:
+        return _ensure_h3_i2v_adapter(connection, workflow_dir)
+
+
+def dashboard(root: Path, workflow_dir: Path) -> dict[str, Any]:
+    with open_registry(root) as connection:
+        _ensure_h3_r2v_adapter(connection, workflow_dir)
+        registered_targets = model_test_r2v.registered_project_targets(root)
+        registrations_by_suite_id = {
+            (
+                model_test_r2v.project_scene_suite_id(
+                    str(target["project_id"]), str(target["scene_id"])
+                )
+                if target.get("scene_id")
+                else model_test_r2v.project_suite_id(str(target["project_id"]))
+            ): target
+            for target in registered_targets
+        }
+        i2v_registered_targets = model_test_i2v.registered_project_targets(root)
+        registrations_by_suite_id.update({
+            model_test_i2v.project_scene_suite_id(
+                str(target["project_id"]), str(target["scene_id"])
+            ): target
+            for target in i2v_registered_targets
+        })
         models = [dict(row) for row in connection.execute("SELECT model_id,provider,family,display_name,version,checkpoint_sha256,source_url,license_name FROM models ORDER BY display_name")]
+        for model in models:
+            model["legacy_read_only"] = is_legacy_ltx_model(model)
+        legacy_model_ids = {
+            model["model_id"] for model in models if model["legacy_read_only"]
+        }
         workflows = [dict(row) for row in connection.execute("SELECT workflow_profile_id,model_id,name,profile_kind,workflow_filename,workflow_sha256,workflow_format,source_url,notes,created_at FROM workflow_profiles ORDER BY created_at DESC")]
+        sol_attn_defaults_by_profile: dict[str, dict[str, Any]] = {}
+        for profile in workflows:
+            profile["legacy_read_only"] = profile["model_id"] in legacy_model_ids
+            profile["sol_attn_configurable"] = False
+            profile["sol_attn_defaults"] = None
+            if (
+                profile["workflow_filename"]
+                != model_test_r2v.R2V_PINT8_WORKFLOW_FILENAME
+            ):
+                continue
+            try:
+                defaults = sol_attn_defaults_for_profile(connection, profile)
+            except (OSError, ValueError):
+                # Stale, hash-mismatched profiles remain visible for history,
+                # but cannot overwrite the form with unverified defaults.
+                continue
+            if defaults is not None:
+                profile["sol_attn_configurable"] = True
+                profile["sol_attn_defaults"] = defaults
+                sol_attn_defaults_by_profile[profile["workflow_profile_id"]] = defaults
         adapters = [dict(row) for row in connection.execute("SELECT adapter_id,workflow_profile_id,adapter_name,adapter_version,config_json,created_at FROM workflow_adapters ORDER BY created_at DESC")]
         for adapter in adapters:
             adapter["config"] = json.loads(adapter.pop("config_json"))
             adapter["input_mode"] = ("h3_r2v_multi_reference" if adapter["config"].get("multi_reference") else ("i2v" if "reference_image" in adapter["config"].get("bindings", {}) else "text_only"))
+            adapter["legacy_read_only"] = next(
+                (
+                    profile["legacy_read_only"]
+                    for profile in workflows
+                    if profile["workflow_profile_id"] == adapter["workflow_profile_id"]
+                ),
+                False,
+            )
         suites = []
         for row in connection.execute(
             """SELECT * FROM benchmark_suites WHERE active=1
@@ -817,9 +1320,38 @@ def dashboard(root: Path, workflow_dir: Path) -> dict[str, Any]:
             (I2V_SUITE_ID,),
         ):
             suite = dict(row)
-            if row["suite_id"] == I2V_SUITE_ID:
+            registration = registrations_by_suite_id.get(row["suite_id"])
+            source_project_id = (
+                str(registration["project_id"])
+                if registration
+                else (
+                    model_test_r2v.DRAGON_SEASON_1_PROJECT_ID
+                    if row["suite_id"] == model_test_r2v.DRAGON_SEASON_1_SUITE_ID
+                    else None
+                )
+            )
+            source_scene_id = (
+                str(registration.get("scene_id") or "") or None
+                if registration
+                else None
+            )
+            protected_official_suite = (
+                source_project_id == model_test_r2v.DRAGON_SEASON_1_PROJECT_ID
+                and source_scene_id is None
+            )
+            suite["project_test_set_id"] = (
+                str(registration["project_test_set_id"])
+                if registration
+                else None
+            )
+            suite["deletable"] = bool(
+                registration and not protected_official_suite
+            )
+            suite["source_project_id"] = source_project_id
+            suite["source_scene_id"] = source_scene_id
+            if row["suite_id"] == I2V_SUITE_ID or model_test_i2v.is_i2v_suite_id(row["suite_id"]):
                 suite["input_mode"] = "i2v_fixed_anchor"
-            elif row["suite_id"] in model_test_r2v.R2V_SUITE_IDS:
+            elif model_test_r2v.is_r2v_suite_id(row["suite_id"]):
                 suite["input_mode"] = "h3_r2v_multi_reference"
             else:
                 suite["input_mode"] = "mixed"
@@ -840,13 +1372,40 @@ def dashboard(root: Path, workflow_dir: Path) -> dict[str, Any]:
                     (case["case_version_id"],),
                 )]
             suites.append(suite)
-        sessions = [dict(row) for row in connection.execute("""SELECT s.*,m.display_name model_name,w.name workflow_name,w.profile_kind,(SELECT COUNT(*) FROM test_session_cases c WHERE c.session_id=s.session_id) case_count FROM test_sessions s JOIN models m ON m.model_id=s.model_id JOIN workflow_profiles w ON w.workflow_profile_id=s.workflow_profile_id ORDER BY s.created_at DESC LIMIT 100""")]
+        sessions = [dict(row) for row in connection.execute("""SELECT s.*,m.display_name model_name,w.name workflow_name,w.profile_kind,w.workflow_filename,(SELECT COUNT(*) FROM test_session_cases c WHERE c.session_id=s.session_id) case_count FROM test_sessions s JOIN models m ON m.model_id=s.model_id JOIN workflow_profiles w ON w.workflow_profile_id=s.workflow_profile_id ORDER BY s.created_at DESC LIMIT 100""")]
         for session in sessions:
-            batch_link = connection.execute(
-                "SELECT batch_id,queued_at FROM test_session_batches WHERE session_id=?",
+            session["legacy_read_only"] = session["model_id"] in legacy_model_ids
+            stored_settings = session.get("workflow_settings_json") or "{}"
+            session["workflow_settings"] = effective_session_workflow_settings(
+                connection,
+                session,
+                sol_attn_defaults=sol_attn_defaults_by_profile.get(
+                    session["workflow_profile_id"]
+                ),
+            )
+            session["workflow_settings_inherited"] = (
+                stored_settings.strip() in {"", "{}"}
+                and bool(session["workflow_settings"])
+            )
+            session.pop("workflow_settings_json", None)
+            if session["suite_id"] == I2V_SUITE_ID or model_test_i2v.is_i2v_suite_id(session["suite_id"]):
+                session["input_mode"] = "i2v_fixed_anchor"
+            elif model_test_r2v.is_r2v_suite_id(session["suite_id"]):
+                session["input_mode"] = "h3_r2v_multi_reference"
+            else:
+                session["input_mode"] = "mixed"
+            h3_link = connection.execute(
+                """SELECT r.settings_json FROM test_session_runs sr
+                   JOIN generation_runs r ON r.run_id=sr.run_id
+                   WHERE sr.session_id=? ORDER BY r.created_at,r.run_id LIMIT 1""",
                 (session["session_id"],),
             ).fetchone()
-            session["batch_id"] = batch_link["batch_id"] if batch_link else None
+            try:
+                h3_settings = json.loads(h3_link["settings_json"] or "{}") if h3_link else {}
+            except (TypeError, json.JSONDecodeError):
+                h3_settings = {}
+            session["h3_queue_id"] = h3_settings.get("test_queue_id")
+            session["queue_backend"] = h3_settings.get("queue_backend")
             lineage = connection.execute(
                 "SELECT parent_session_id,reason FROM test_session_lineage WHERE child_session_id=?",
                 (session["session_id"],),

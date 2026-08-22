@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 import benchmark_jobs
+import model_test_r2v
 import model_test_registry
 import model_test_reviews
 from job_queue import read_json
@@ -11,13 +13,15 @@ from tests.test_benchmark_jobs import BenchmarkJobsTest
 
 class ModelTestReviewsTest(unittest.TestCase):
     def setUp(self):
-        self.fixture = BenchmarkJobsTest(methodName="test_schema_v5_contains_session_batch_link")
+        self.fixture = BenchmarkJobsTest(methodName="test_schema_v10_has_no_batch_link_table")
         self.fixture.setUp()
         self.root = self.fixture.root
         self.session_id = self.fixture.session_id
         queued = benchmark_jobs.queue_session(self.root, self.session_id)
         self.job_id = queued["job_ids"][0]
-        self.request = read_json(self.root / "jobs" / self.job_id / "request.json", {})
+        self.request = read_json(
+            self.root / "runtime/h3/jobs" / self.job_id / "request.json", {}
+        )
         benchmark_jobs.record_result(
             self.root,
             self.request,
@@ -89,6 +93,66 @@ class ModelTestReviewsTest(unittest.TestCase):
         self.assertEqual(group["reviewed_count"], 1)
         self.assertEqual(group["average_scores"]["prompt_adherence"], 5.0)
         self.assertEqual(group["verdict_counts"]["needs_improvement"], 1)
+
+    def test_comparison_classifies_pint8_workflow_as_r2v(self):
+        with model_test_registry.open_registry(self.root) as connection:
+            connection.execute(
+                "UPDATE workflow_profiles SET workflow_filename=? "
+                "WHERE workflow_profile_id=?",
+                (
+                    model_test_r2v.R2V_PINT8_WORKFLOW_FILENAME,
+                    self.request["workflow_profile_id"],
+                ),
+            )
+        comparison = model_test_reviews.comparison(self.root)
+        group = next(
+            row
+            for row in comparison["groups"]
+            if row["workflow_profile_id"] == self.request["workflow_profile_id"]
+        )
+        self.assertEqual("h3_r2v_multi_reference", group["input_mode"])
+
+    def test_comparison_keeps_sol_attn_parameter_variants_separate(self):
+        first_settings = {"sol_attn": {"tau": 1.3}}
+        second_settings = {"sol_attn": {"tau": 1.8}}
+        with model_test_registry.open_registry(self.root) as connection:
+            connection.execute(
+                "UPDATE workflow_profiles SET workflow_filename=? "
+                "WHERE workflow_profile_id=?",
+                (
+                    model_test_r2v.R2V_PINT8_WORKFLOW_FILENAME,
+                    self.request["workflow_profile_id"],
+                ),
+            )
+            connection.execute(
+                "UPDATE test_sessions SET workflow_settings_json=? WHERE session_id=?",
+                (json.dumps(first_settings), self.session_id),
+            )
+            connection.execute(
+                """INSERT INTO test_sessions(
+                       session_id,suite_id,model_id,workflow_profile_id,adapter_id,status,
+                       repetitions,output_width,output_height,workflow_settings_json,
+                       notes,created_at,updated_at
+                   )
+                   SELECT ?,suite_id,model_id,workflow_profile_id,adapter_id,'planned',
+                          repetitions,output_width,output_height,?,notes,created_at,updated_at
+                   FROM test_sessions WHERE session_id=?""",
+                (
+                    "test_sol_attn_variant",
+                    json.dumps(second_settings),
+                    self.session_id,
+                ),
+            )
+        groups = [
+            row for row in model_test_reviews.comparison(self.root)["groups"]
+            if row["workflow_profile_id"] == self.request["workflow_profile_id"]
+        ]
+        self.assertEqual(2, len(groups))
+        self.assertEqual(
+            {1.3, 1.8},
+            {row["workflow_settings"]["sol_attn"]["tau"] for row in groups},
+        )
+        self.assertEqual({"h3_r2v_multi_reference"}, {row["input_mode"] for row in groups})
 
 
     def test_ai_review_is_separate_and_human_review_has_display_priority(self):

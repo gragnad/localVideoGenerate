@@ -1,0 +1,17 @@
+[Unit]
+Description=NAL Studio remote H3 prompt revision dispatcher
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/nalstudio/local-ai/video-engine
+EnvironmentFile=%h/.config/h3-video-engine/runtime.env
+Environment=VIDEO_ENGINE_ROOT=/home/nalstudio/local-ai/video-engine
+ExecStart=/home/nalstudio/local-ai/video-engine/.venv/bin/python /home/nalstudio/local-ai/video-engine/prompt_revision_dispatcher.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

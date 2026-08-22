@@ -1,45 +1,304 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LTX Director Studio</title><link rel="stylesheet" href="/styles.css?v=20260805-10"></head><body><aside><div class="brand"><small>NALSTUDIO · DGX SPARK</small><strong>LTX Director<br>Studio</strong></div><div class="sidebar-scroll"><nav><button data-page="create" class="active">01 H3 생성</button>
-<button data-page="msr-v2">02 MSR v2 생성</button>
-<button data-page="queue">03 큐 · 진행</button>
-<button data-page="candidates">04 후보 선택</button>
-<button data-page="master">05 최종 마스터</button>
-<button data-page="results">06 결과 · Retake</button>
-<button data-page="revision">07 재생성 편집실</button>
-<button data-page="assembly">08 편집 스튜디오</button>
-<button data-page="source-images">09 소스 이미지</button>
-<button data-page="model-tests">10 모델 테스트</button>
-<button data-page="r2v-tests">11 R2V 테스트</button>
-<button data-page="automation">12 자동화</button></nav><div id="services" class="services"></div></div></aside><main><header><div><small>VIDEO GENERATION & QUALITY CONTROL</small><h1 id="title">새 영상 생성</h1></div><button id="refresh">상태 새로고침</button></header><div id="notice"></div><dialog id="deleteDialog"><form method="dialog"><h3>삭제 확인</h3><p id="deleteDialogMessage"></p><label>삭제 비밀번호<input id="deletePassword" type="password" autocomplete="current-password" required></label><div class="dialog-actions"><button value="cancel">취소</button>
-<button id="deleteDialogConfirm" class="danger" value="confirm">삭제 실행</button></div></form></dialog>
-<dialog id="candidateReviewDialog" class="candidate-review-dialog"><form id="candidateReviewForm"><div class="candidate-review-head"><div><p class="eyebrow">CANDIDATE PROBLEM REVIEW</p><h3 id="candidateReviewTitle">후보 문제 리뷰</h3><p id="candidateReviewMeta" class="muted"></p></div><button type="button" id="candidateReviewClose" class="mini">닫기</button></div><div class="candidate-review-overview"><label>종합 판단<select name="verdict"><option value="unrated">판단 보류</option><option value="acceptable">사용 가능</option><option value="needs_improvement">개선 필요</option><option value="reject">사용 어려움</option></select></label><label>잘된 부분<textarea name="positive_note" rows="3" placeholder="유지하고 싶은 구도, 표정, 움직임, 색감 등을 기록하세요."></textarea></label><label>종합 메모<textarea name="overall_note" rows="3" placeholder="후보 전체에 대한 판단을 기록하세요."></textarea></label></div><div class="candidate-review-issues-head"><div><h3>발견한 문제</h3><p class="muted">문제마다 시간 구간과 의도·실제 출력·차이·원인 추정·개선안을 분리해 기록합니다.</p></div><button type="button" id="candidateReviewAddIssue">문제 추가</button></div><div id="candidateReviewIssues" class="candidate-review-issues"></div><div class="dialog-actions candidate-review-actions"><span id="candidateReviewSaveStatus" class="muted"></span><button type="button" id="candidateReviewCancel">나중에 계속 작성</button>
-<button type="submit" class="primary">리뷰 저장</button></div></form></dialog>
-<section data-view="create"><div class="h3-empty-state"><p class="eyebrow">MINIMAX H3 / LOCAL OPEN WEIGHTS</p><h2>H3 공식 워크플로우 공개 대기</h2><p>01 생성은 비워 두었습니다. 공식 모델·라이선스·ComfyUI 워크플로우와 입력 규격이 확인된 뒤 H3 전용 생성 화면을 구성합니다.</p><div class="h3-empty-card"><strong>현재 생성 기능 비활성</strong><span>추정 설정이나 기존 LTX 입력값을 H3에 적용하지 않습니다.</span></div></div><div id="legacyCreateCompatibility" hidden aria-hidden="true"><div class="hero"><p class="eyebrow">CREATE / CR</p><h2>이미지에서 장면을 설계하고<br>후보 비교부터 최종 검수까지 연결합니다.</h2><p>입력값은 화면을 이동해도 유지됩니다. 비디오 seed는 기본 자동(−1)이며, 후보군은 서로 다른 RandomNoise seed로 생성됩니다.</p></div><form id="createForm" class="panel"><div class="grid4"><label>작업 이름<input name="job_name" value="LTX_scene"></label><label>FPS<input name="fps" type="number" value="24"></label><label>비디오 Seed<input name="seed" type="number" value="-1" title="-1 = 자동 랜덤 · 0 이상 = 고정"><small>−1 = 자동 랜덤 · 0 이상 = 고정</small></label><label>해상도<select name="resolution"><option value="512x288">512 × 288 · 저해상도 테스트</option><option value="1024x576">1024 × 576 · 빠른 생성</option><option value="1280x704">1280 × 704 · 후보 · 32배수</option><option value="1536x864" selected>1536 × 864 · 기본 · 32배수</option><option value="2048x1152">2048 × 1152 · 매우 높음 / 메모리 주의</option></select></label></div><details id="seedRecommendPanel" class="seed-recommend panel"><summary class="seed-recommend-summary"><div><h3>추천 seed</h3><p class="muted">저장된 좋아요 seed와 현재 프롬프트 유사도를 기준으로 제안합니다.</p></div><small id="seedRecommendMeta">분석 대기</small></summary><div id="seedRecommendList" class="seed-recommend-list muted">저장된 seed가 없거나 프롬프트를 입력하세요.</div></details><label>Global prompt<textarea name="global_prompt">Project style: Original ocean fantasy growth-adventure world, cinematic fantasy realism, wide 16:9. All spoken dialogue must be natural Korean only.</textarea></label><div id="uploadZone" class="upload" tabindex="0"><strong>여러 시작 이미지를 여기에 드래그 앤 드롭</strong><span>또는 클릭해서 PNG · JPG · WEBP 파일을 여러 장 선택하세요. 추가 드롭 시 기존 목록에 누적됩니다.</span><input id="images" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden><button type="button" id="chooseImages">이미지 선택</button><small id="imageCount">선택된 이미지 없음</small></div><details id="savedImageLibraryPanel" class="saved-image-library panel"><summary class="saved-image-library-summary"><div><h3>저장된 이미지 불러오기</h3><p class="muted">이전 작업에 저장된 원본 이미지를 클릭하면 아래 장면 목록에 추가됩니다. 새 업로드와 별도로 동작합니다.</p></div><small id="savedImageLibraryMeta">불러오는 중…</small></summary><div id="savedImageLibrary" class="saved-image-grid muted">저장된 이미지가 없습니다.</div><button type="button" id="savedImageLibraryMore" class="saved-image-more" hidden>더 보기</button></details><div id="segments"></div><div class="create-actions"><button class="primary">단일 작업 큐에 등록</button><label>후보 개수<select name="candidate_count"><option value="2">2개</option><option value="3" selected>3개</option><option value="4">4개</option><option value="6">6개</option></select></label><button type="button" id="createCandidates" class="primary alt">후보군 생성</button></div></form></div></section>
-<section data-view="msr-v2" hidden>
-<div class="hero"><p class="eyebrow">LTX 2.3 / MSR CONTINUITY V1</p><h2>통합 앵커와 최대 2명의 캐릭터로<br>최대 20초 연속 구간을 생성합니다.</h2><p>Director 프롬프트를 상속하지 않습니다. 시나리오를 새 MSR 연속 구간으로 재구성하고, 행동은 프롬프트 릴레이에 맡깁니다.</p></div>
-<details id="msrPromptProjectPanel" class="msr-prompt-project panel"><summary class="msr-prompt-project-summary"><div><h3>저장된 새 MSR 연속 프롬프트</h3><p class="muted">msr_sequence_v2 · msr_continuity_v1 전략으로 작성된 프로젝트만 불러올 수 있습니다. 기존 Director/MSR 프롬프트는 차단됩니다.</p></div><small id="msrPromptProjectMeta">불러오는 중…</small></summary><div class="msr-prompt-project-toolbar"><label>프로젝트<select id="msrPromptProjectSelect"></select></label><button type="button" id="msrPromptProjectRefresh">새로고침</button></div><details id="msrBgSection" class="msr-collapse-section" hidden><summary class="msr-collapse-section-summary"><div><strong>프로젝트 통합 앵커</strong><span class="muted msr-collapse-section-meta" id="msrBgSectionMeta"></span></div></summary><div class="msr-collapse-section-body"><div id="msrBackgroundManager" class="msr-background-manager"></div></div></details><details id="msrClipSection" class="msr-collapse-section" open><summary class="msr-collapse-section-summary"><div><strong>연속 생성 구간 선택</strong><span class="muted msr-collapse-section-meta" id="msrClipSectionMeta"></span></div></summary><div class="msr-collapse-section-body"><div id="msrPromptClipList" class="msr-prompt-clip-list muted">프로젝트를 선택하세요.</div></div></details><details id="msrPreviewSection" class="msr-collapse-section" hidden><summary class="msr-collapse-section-summary"><div><strong>구간 미리보기</strong><span class="muted msr-collapse-section-meta" id="msrPreviewSectionMeta"></span></div></summary><div class="msr-collapse-section-body"><div id="msrPromptPreview" class="msr-prompt-preview"></div></div></details><div class="msr-prompt-load-actions"><button type="button" id="msrPromptLoad" class="primary alt" disabled>새 MSR 구간 불러오기</button></div></details>
-<form id="msrForm" class="panel"><input type="hidden" name="prompt_strategy" value="msr_continuity_v1"><div class="grid4"><label>작업 이름<input name="job_name" value="MSR_sequence"></label><label>원본 시나리오 구간<input name="source_scene_refs" placeholder="예: SC01-002_01 scenes 1–4"></label><label>연결 방식<select name="continuity_mode"><option value="new_anchor" selected>새 통합 앵커</option><option value="continuity_frame">이전 영상 연결 프레임</option></select></label><label>해상도<select name="resolution"><option value="960x544">960 × 544</option><option value="1280x704" selected>1280 × 704 · 기본</option><option value="1536x864">1536 × 864</option></select></label></div><div class="grid4"><label>FPS<input name="fps" type="number" value="24" readonly><small>24fps 고정</small></label><label>비디오 Seed<input name="seed" type="number" value="-1"><small>−1 = 후보마다 자동 랜덤</small></label><label>후보 개수<select name="candidate_count"><option value="2">2개</option><option value="3" selected>3개</option><option value="4">4개</option><option value="6">6개</option></select></label><label>최대 길이<input value="20초" readonly><small id="msrTotalDuration">현재 10.00초 / 20초</small></label></div><label>세계관 · 영상 스타일<textarea name="world_prompt" class="prompt" required placeholder="이 연속 구간에 필요한 세계관과 영상 스타일만 짧게 입력하세요."></textarea></label><label>컴파일된 MSR Global 미리보기<textarea id="msrGlobalPreview" class="prompt" readonly placeholder="캐릭터·소품 설명을 입력하면 자동으로 구성됩니다."></textarea><small>이 값은 서버에서 다시 컴파일됩니다. Director 글로벌은 사용되지 않습니다.</small></label><h3>캐릭터 · 소품 참조</h3><p class="muted">슬롯 1·2만 캐릭터입니다. 슬롯 3·4는 소품 전용이며 인물을 넣지 마세요. 슬롯 번호는 비어 있어도 압축되지 않습니다.</p><div class="msr-reference-grid"><label>캐릭터 1 · 필수<input id="msrRef1" type="file" accept="image/png,image/jpeg,image/webp" required><textarea id="msrRefDesc1" placeholder="Picture 1 캐릭터의 핵심 외형과 의상" required></textarea></label><label>캐릭터 2 · 선택<input id="msrRef2" type="file" accept="image/png,image/jpeg,image/webp"><textarea id="msrRefDesc2" placeholder="Picture 2 캐릭터의 핵심 외형과 의상"></textarea></label><label>소품 3 · 선택<input id="msrRef3" type="file" accept="image/png,image/jpeg,image/webp"><textarea id="msrRefDesc3" placeholder="Picture 3 소품의 형태·재질·소유자"></textarea></label><label>소품 4 · 선택<input id="msrRef4" type="file" accept="image/png,image/jpeg,image/webp"><textarea id="msrRefDesc4" placeholder="Picture 4 소품의 형태·재질·소유자"></textarea></label><label class="msr-background">통합 앵커 이미지<input id="msrBackground" type="file" accept="image/png,image/jpeg,image/webp" required><textarea id="msrBackgroundDesc" placeholder="공간, 인물 관계, 이동 동선과 조명 설명" required></textarea></label></div><div class="msr-relay-head"><div><h3>최대 20초 프롬프트 릴레이</h3><p class="muted">행동·감정·한국어 대사·간단한 카메라 반응을 입력합니다. 각 행동마다 이미지를 추가하지 않습니다.</p></div><button type="button" id="addMsrRelay">구간 추가</button></div><div id="msrRelaySegments"></div><div class="create-actions"><span class="muted">통합 앵커 1장 + 캐릭터 최대 2명 + 소품 최대 2개</span><button type="submit" class="primary alt">새 MSR 연속 후보군 등록</button></div></form></section>
-<section data-view="queue" hidden><div class="heading queue-heading"><div><p class="eyebrow">LIVE PIPELINE</p><h2>현재 배치와 작업 흐름</h2><p>실행 중인 작업과 확인이 필요한 문제를 우선 표시합니다.</p></div><small id="queueUpdated">상태 불러오는 중</small></div><div id="activeBatch"></div><div id="pendingBatches"></div><div id="queueMetrics"></div><div id="queueWork"></div><div id="queueProblems"></div><details id="batchHistory" class="batch-history"><summary>완료·과거 배치</summary><div id="batchHistoryList"></div></details></section>
-<section data-view="candidates" hidden><div class="heading"><p class="eyebrow">CANDIDATE SELECTION</p><h2>후보 영상을 직접 비교하고 최종 소스를 선택합니다.</h2><p>등록된 후보 생성 배치가 모두 끝날 때까지 선택은 잠깁니다. 전체 완료 후 선택·업스케일·최종 검수는 등록 순서대로 진행됩니다.</p></div><div id="candidateSets"></div></section>
-<section data-view="master" hidden><div class="heading"><p class="eyebrow">FINAL MASTER</p><h2>최종 영상을 확인하고 AI 검수를 등록합니다.</h2><p>후보 선택(Path A) 또는 합성 완료(Path B) 후, 여기서 영상을 확인하고 최종 AI 검수를 수동으로 등록합니다. vLLM 단일 영상 검수가 진행됩니다.</p></div><div id="masterSets"></div></section>
-<section data-view="results" hidden><div class="heading"><p class="eyebrow">REVIEW / RETAKE</p><h2>원본과 수정본, 실패 근거를 한 화면에서</h2></div><div class="panel"><div class="result-toolbar"><label>작업 계보 선택<select id="lineage"></select></label><div class="toolbar-actions"><button type="button" id="playBoth" class="sync-play" disabled>두 영상 동시 재생</button>
-<button type="button" id="openRevision">재생성 편집실에서 열기</button>
-<button type="button" id="deleteLineage" class="danger">선택 결과 완전 삭제</button></div></div><div id="compare" class="compare"></div><div id="report"></div></div><form id="retakeForm" class="panel"><h3>사용자 재수정</h3><div class="grid4"><label>기준 영상<select id="sourceJob"></select></label><label>수정 방식<select id="mode"><option value="auto">자동 판단</option><option value="partial_retake">부분 수정</option><option value="full_regeneration">전체 재생성</option></select></label><label>시작(초)<input id="start" type="number" min="0" step="0.25" value="0"></label><label>종료(초)<input id="end" type="number" min="0" step="0.25" value="3"></label></div><label>추가 수정 지시<textarea id="instruction" placeholder="예: 4초부터 손 동작을 자연스럽게 연결하고 표정은 유지"></textarea></label><label>부분 수정 기준 영상<input id="video" type="file" accept="video/*"></label><button type="button" id="makePrompt">수정 프롬프트 생성 · 미리보기</button><label>실제 적용 예정 프롬프트<textarea id="promptPreview" class="prompt" readonly></textarea></label><button class="primary">이 프롬프트로 재수정 등록</button></form></section>
-<section data-view="revision" hidden><div class="heading"><p class="eyebrow">REVISION STUDIO</p><h2>후보군 생성 입력을 불러와 새 버전으로 재설계합니다.</h2><p>선택한 후보군에 등록됐던 이미지·프롬프트·해상도 설정을 그대로 불러옵니다. 편집 후 단일 작업 또는 후보군으로 새 생성 큐에 등록할 수 있습니다.</p></div><div class="panel revision-source"><div class="result-toolbar"><label>기준 후보군 선택<select id="revisionSource"></select></label><button type="button" id="loadRevision">선택 후보군 불러오기</button></div><p id="revisionSummary" class="muted">후보군을 선택하고 불러오기를 누르세요.</p></div><form id="revisionForm" class="panel"><div class="grid4"><label>새 작업 이름<input name="job_name" value="LTX_scene_revision"></label><label>FPS<input name="fps" type="number" min="1" value="24"></label><label>비디오 Seed<input name="seed" type="number" value="-1" title="-1 = 자동 랜덤 · 0 이상 = 고정"><small>−1 = 자동 랜덤 · 0 이상 = 고정</small></label><label>해상도<select name="resolution"><option value="512x288">512 × 288 · 저해상도 테스트</option><option value="1024x576">1024 × 576 · 빠른 생성</option><option value="1280x704">1280 × 704 · 32배수</option><option value="1536x864">1536 × 864 · 고해상도</option><option value="2048x1152">2048 × 1152 · 매우 높음 / 메모리 주의</option></select></label></div><label>Global prompt<textarea name="global_prompt"></textarea></label><div class="revision-corrections"><label class="toggle"><input name="apply_corrections" type="checkbox"> 추가 수정 지시를 Global prompt에 반영</label><label>추가 수정 지시<textarea name="corrections" placeholder="필요하면 직접 수정 지시를 입력하세요."></textarea></label></div><div id="revisionUploadZone" class="upload" tabindex="0"><strong>추가 이미지를 여기에 드래그 앤 드롭</strong><span>불러온 원본 이미지를 유지하면서 새 이미지를 추가하거나 기존 이미지를 제거할 수 있습니다.</span><input id="revisionImages" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden><button type="button" id="chooseRevisionImages">이미지 추가</button><small id="revisionImageCount">불러온 이미지 없음</small></div><div id="revisionSegments"></div><div class="create-actions"><button class="primary">단일 작업 큐에 등록</button><label>후보 개수<select name="candidate_count"><option value="2">2개</option><option value="3" selected>3개</option><option value="4">4개</option><option value="6">6개</option></select></label><button type="button" id="revisionCreateCandidates" class="primary alt">후보군 생성</button></div></form></section>
-<section data-view="assembly" hidden><div class="heading"><p class="eyebrow">CLIP ASSEMBLY STUDIO</p><h2>후보 영상을 골라 잘라 붙입니다.</h2><p>완료된 후보 영상만 선택할 수 있습니다. FPS·해상도가 같은 클립 2~4개, 총 길이 60초 이하까지 합성할 수 있습니다. 합성이 완료되면 04 최종 마스터에서 AI 검수를 등록하세요.</p></div><div class="assembly-layout"><div class="panel assembly-library"><div class="result-toolbar"><label>후보군 필터<select id="assemblySetFilter"><option value="">전체 후보군</option></select></label></div><div id="assemblyLibrary" class="assembly-library-list"></div></div><div class="panel assembly-timeline"><div class="assembly-timeline-head"><h3>타임라인</h3><small id="assemblyTimelineMeta">0 / 4 클립 · 0.0초</small></div><div id="assemblyTimeline" class="assembly-timeline-list"></div><div id="assemblyPreview" class="assembly-preview muted">클립을 선택하면 구간 미리보기가 표시됩니다.</div></div><!-- manual upload UI disabled
-<div class="panel assembly-actions"><label>프로젝트 이름<input id="assemblyName" value="LTX_assembly"></label><div id="assemblySummary" class="assembly-summary muted">클립을 추가하고 구간을 지정하세요.</div><button type="button" id="assemblyRun" class="primary">합성 실행</button><div class="assembly-manual-upload"><h3>외부 편집본 업로드</h3><p class="muted">직접 편집한 영상을 올리면 합성 완료 상태가 되며 바로 디테일 보강을 등록할 수 있습니다.</p><label>편집본 영상<input type="file" id="assemblyManualVideo" accept="video/*"></label><label>Retake 참조 후보<select id="assemblyReferenceJob"><option value="">타임라인 첫 클립 사용</option></select></label><label class="toggle"><input type="checkbox" id="assemblyManualEnhance" checked> 업로드 후 디테일 보강 바로 등록</label><button type="button" id="assemblyManualUpload" class="primary">편집본 업로드</button></div></div>
---></div><div id="assemblyCompositionSet"></div></section>
-<section data-view="source-images" hidden><div class="heading"><p class="eyebrow">SOURCE IMAGE LIBRARY</p><h2>저장된 원본 이미지를 확인하고 정리합니다.</h2><p>같은 이미지는 SHA256 기준으로 묶어 표시합니다. 원본 파일을 다운로드하거나 삭제할 수 있습니다. 삭제하면 모든 작업 폴더의 해당 파일 복사본이 제거됩니다. 생성된 영상은 유지됩니다.</p></div><div class="panel"><div class="saved-image-library-head"><div><h3>로컬 이미지 라이브러리</h3><p id="sourceImagesSummary" class="muted">불러오는 중…</p></div><button type="button" id="refreshSourceImages">목록 새로고침</button></div><div id="sourceImagesGrid" class="saved-image-grid muted">저장된 이미지가 없습니다.</div></div></section>
-<section data-view="model-tests" hidden><div class="heading"><p class="eyebrow">MODEL BENCHMARK LAB</p><h2>새 비디오 모델을 같은 기준으로 빠르게 파악합니다.</h2><p>제작사 공식 워크플로우를 기준선으로 등록하고, 공통 진단 케이스를 세션으로 고정합니다. 실행 계획과 사전검사를 통과한 세션만 독립 테스트 큐로 등록합니다.</p></div><div class="model-test-summary" id="modelTestSummary"></div><div class="model-test-forms"><form id="testModelForm" class="panel"><h3>1. 모델 프로필</h3><div class="grid2"><label>제작사<input name="provider" required placeholder="예: Black Forest Labs"></label><label>제품군<input name="family" required placeholder="예: FLUX"></label><label>표시 이름<input name="display_name" required placeholder="예: FLUX Video Open"></label><label>버전<input name="version" placeholder="공식 버전"></label></div><label>공식 출처 URL<input name="source_url" type="url" placeholder="모델 카드 또는 공식 발표"></label><label>라이선스<input name="license_name" placeholder="확인되지 않으면 비워 둠"></label><button class="primary">모델 등록</button></form><form id="testWorkflowForm" class="panel"><h3>2. 워크플로우 프로필</h3><label>모델<select name="model_id" id="testWorkflowModel" required></select></label><label>ComfyUI 워크플로우<select name="workflow_filename" id="testWorkflowFile" required></select></label><label>유형<select name="profile_kind"><option value="official_baseline">공식 기준선</option><option value="controlled_variant">통제 변형</option><option value="optimized_variant">프로젝트 최적화</option></select></label><label>프로필 이름<input name="name" required placeholder="공식 샘플 워크플로우"></label><label>공식 출처 URL<input name="source_url" type="url"></label><label>메모<textarea name="notes" placeholder="변경하지 않은 공식 기본값과 확인 사항"></textarea></label><button class="primary">워크플로우 등록</button></form><form id="testAdapterForm" class="panel"><h3>3. 워크플로우 어댑터</h3><label>워크플로우 프로필<select name="workflow_profile_id" id="testAdapterWorkflow" required></select></label><div class="grid2"><label>어댑터 이름<input name="adapter_name" value="Official bindings" required></label><label>버전<input name="adapter_version" value="1" required></label></div><label>프롬프트 템플릿<textarea name="prompt_template" required>{prompt}</textarea><small>{prompt}는 공통 영문 정규 프롬프트, {intent_ko}는 한국어 의도입니다.</small></label><button type="button" id="inspectTestWorkflow">입력 노드 검사</button><div id="testAdapterBindings" class="model-test-bindings muted">워크플로우를 선택하고 입력 노드를 검사하세요.</div><button class="primary">어댑터 검증 · 등록</button></form><form id="testSessionForm" class="panel"><h3>4. 테스트 세션</h3><label>모델<select name="model_id" id="testSessionModel" required></select></label><label>등록 워크플로우<select name="workflow_profile_id" id="testSessionWorkflow" required></select></label><label>검증된 어댑터<select name="adapter_id" id="testSessionAdapter" required></select></label><label>테스트 세트<select name="suite_id" id="testSessionSuite" required></select></label><label>출력 해상도<select name="resolution" id="testSessionResolution" required><option value="512x288">512 × 288 · 빠른 저해상도</option><option value="768x432" selected>768 × 432 · 기본 비교</option><option value="832x480">832 × 480 · MiniMax H3 빠른 테스트</option><option value="960x544">960 × 544 · 중간 해상도</option><option value="1024x576">1024 × 576 · 16:9</option><option value="1280x704">1280 × 704 · 고품질 후보</option><option value="1344x768">1344 × 768 · MiniMax H3 고품질</option><option value="1536x864">1536 × 864 · 고해상도</option></select><small>실행 계획에 고정되며 어댑터의 너비·높이 바인딩으로 전달됩니다.</small></label><label>케이스별 반복 횟수<input name="repetitions" type="number" min="1" max="10" value="1"></label><label>세션 메모<textarea name="notes" placeholder="1회 빠른 진단 후 필요한 케이스만 반복 권장"></textarea></label><button class="primary alt">실행 계획 생성</button></form></div><div class="panel"><div class="model-test-head"><div><h3>테스트 케이스</h3><p class="muted">공통 진단과 I2V 고정 앵커 세트의 입력·평가 기준만 표시됩니다. H3 R2V는 11 R2V 테스트에서 별도로 관리합니다.</p></div><div class="model-test-head-actions"><button type="button" id="toggleModelTestCases">공통 케이스 접기</button>
-<button type="button" id="refreshModelTests">새로고침</button></div></div><div id="modelTestCases" class="model-test-cases"></div></div><div class="panel"><h3>테스트 세션 이력</h3><div id="modelTestSessions"></div><div id="modelTestPreflightActions" class="model-test-preflights"></div></div><div class="panel"><div class="model-test-head"><div><h3>역량 분석 · 프롬프트 정책</h3><p class="muted">사람 리뷰를 우선하고, 없으면 최신 Qwen 리뷰를 사용해 증거 수와 신뢰도를 함께 표시합니다.</p></div><div class="model-test-export-actions"><button type="button" id="exportModelTestsJson">JSON 내보내기</button>
-<button type="button" id="exportModelTestsCsv">CSV 내보내기</button></div></div><div class="model-test-analysis-controls"><label>모델<select id="modelTestAnalysisModel"></select></label><label>워크플로우 범위<select id="modelTestAnalysisWorkflow"><option value="">일반 워크플로우 선택</option></select></label><button type="button" id="runModelTestAnalysis" class="primary">분석 갱신</button></div><div id="modelTestAnalysis" class="model-test-analysis"><p class="muted">모델과 워크플로우를 선택해 분석하세요.</p></div></div><div class="panel"><h3>모델 · 워크플로우 비교</h3><p class="muted">최신 리뷰 revision의 공통 점수만 집계합니다.</p><div id="modelTestComparison" class="model-test-comparison"></div></div><div class="panel"><h3>테스트 결과 검수</h3><p class="muted">세션 이력의 「결과 검수」를 눌러 케이스별 영상을 확인하세요.</p><div id="modelTestResults" class="model-test-results"></div></div></section>
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>H3 Director Studio</title>
+  <link rel="stylesheet" href="/styles.css?v=20260816-39">
+  <link rel="stylesheet" href="/review.css?v=20260807-1">
+</head>
+<body>
+<aside>
+  <div class="brand">
+    <small>NALSTUDIO · DGX SPARK</small>
+    <strong>H3 Director<br>Studio</strong>
+  </div>
+  <div class="sidebar-scroll">
+    <nav>
+      <button data-page="create" class="active">01 H3 R2V 생성</button>
+      <button data-page="i2v-create">02 H3 I2V 생성</button>
+      <button data-page="queue">03 큐 · 진행</button>
+      <button data-page="candidates">04 후보 선택</button>
+      <button data-page="results">05 결과 확인</button>
+      <button data-page="model-management">06 모델 관리</button>
+      <button data-page="model-tests">07 모델 테스트</button>
+      <button data-page="r2v-tests">08 R2V 테스트</button>
+    </nav>
+    <div class="sidebar-footer">
+      <div id="services" class="services"></div>
+      <div id="windowsPcStatus" class="windows-pc-status is-loading" aria-live="polite"></div>
+    </div>
+  </div>
+</aside>
+<main>
+  <header>
+    <div>
+      <small>MINIMAX H3 · BATCH-FREE VIDEO PRODUCTION</small>
+      <h1 id="title">H3 R2V 생성</h1>
+    </div>
+    <button id="refresh">상태 새로고침</button>
+  </header>
+  <div id="notice"></div>
+  <section data-view="create">
+    <div class="heading">
+      <p class="eyebrow">MINIMAX H3 · BATCH-FREE PRODUCTION</p>
+      <h2>클립마다 서로 다른 프롬프트 3개로 독립 후보를 생성합니다.</h2>
+      <p>후보 A·B·C는 프롬프트·Seed·작업이 각각 분리되며, 렌더는 Windows PC의 ComfyUI에서 실행하고 결과는 이 제작기로 회수합니다.</p>
+    </div>
+    <div class="panel h3-project-loader">
+      <div class="model-test-head">
+        <div>
+          <h3>H3 프롬프트 프로젝트</h3>
+          <p class="muted">프로젝트의 씬과 클립을 선택하면 최종 프롬프트·길이·Picture 구성을 불러옵니다.</p>
+        </div>
+        <div class="model-test-head-actions"><button type="button" id="deleteH3Project" class="danger" disabled>선택 프로젝트 삭제</button><button type="button" id="refreshH3Projects">프로젝트 새로고침</button></div>
+      </div>
+      <div class="grid3">
+        <label>프로젝트<select id="h3Project"><option value="">프로젝트 선택</option></select></label>
+        <label>씬<select id="h3Scene" disabled><option value="">씬 선택</option></select></label>
+        <label>클립<select id="h3Clip" disabled><option value="">클립 선택</option></select></label>
+      </div>
+      <div class="h3-scene-translation-actions">
+        <button type="button" id="translateH3Scene" aria-controls="h3SceneTranslation" aria-expanded="false" disabled>선택한 씬 연출 번역 보기</button>
+      </div>
+      <section id="h3SceneTranslation" class="h3-scene-translation" aria-live="polite" hidden>
+        <div class="h3-scene-translation-head">
+          <div><b>씬 연출 한국어 번역</b><small id="h3SceneTranslationMeta">씬을 선택하세요.</small></div>
+          <small id="h3SceneTranslationStatus">번역 준비 중…</small>
+        </div>
+        <div id="h3SceneTranslationClips" class="h3-scene-translation-clips"></div>
+        <small>각 클립의 detailed_description만 표시합니다. 생성에 사용하는 원문 프롬프트는 변경되지 않습니다.</small>
+      </section>
+      <div id="h3ProjectPreview" class="h3-project-preview muted">H3 프로젝트를 선택하세요.</div>
+      <section id="h3ClipVersionPanel" class="h3-clip-version-panel" hidden>
+        <div class="h3-clip-version-head"><div><b>클립 버전 기록</b><small id="h3ClipVersionMeta"></small></div></div>
+        <div id="h3ClipVersionList" class="h3-clip-version-list"></div>
+      </section>
+      <button type="button" id="loadH3ProjectClip" class="primary" disabled>선택한 클립 입력 불러오기</button>
+    </div>
+    <form id="h3CreateForm" class="panel h3-create-form">
+      <input type="hidden" name="source_project_id">
+      <input type="hidden" name="source_scene_id">
+      <input type="hidden" name="source_clip_id">
+      <div class="grid4">
+        <label>H3 워크플로우<select name="adapter_id" id="h3Adapter" required><option value="">불러오는 중…</option></select></label>
+        <label>해상도<select name="resolution" id="h3Resolution" required><option value="1280x736">1280 × 736 · 확장 고해상도</option><option value="1280x704">1280 × 704 · 운영 기본</option><option value="960x544">960 × 544 · 1080p 후처리 권장</option><option value="832x480">832 × 480 · 빠른 확인</option><option value="608x352" selected>608 × 352 · 초고속 후보</option></select></label>
+        <label>FPS<input value="24" readonly></label>
+        <label>영상 길이(초)<input name="duration_seconds" type="number" min="1" max="15" step="0.5" value="5" required></label>
+        <label>독립 후보<input value="A · B · C / 3개" readonly><small>각 후보는 별도 Prompt·Seed·Job</small></label>
+        <label>Seed<input name="seed" type="number" value="-1"><small>−1이면 세 후보 각각 랜덤 확정</small></label>
+      </div>
+      <input type="hidden" name="candidate_count" value="3">
+      <details id="h3SolAttnPanel" class="r2v-sol-attn-panel" hidden><summary><div><b>Patch Sol-Attn 설정 · PINT8 전용</b><small>01 H3 R2V 후보 생성에 적용됩니다. INT8 QK·PV와 Morton은 기본적으로 꺼져 있습니다.</small></div><span>펼쳐서 조정</span></summary><fieldset id="h3SolAttnSettings" disabled><div class="r2v-sol-attn-grid"><label>희소화 임계값 · tau<input id="h3SolAttnTau" type="number" min="0" max="4" step="0.05" value="1.3" required><small>높을수록 빠르고 희소해지며 품질 손실 가능성이 커집니다.</small></label><label>시작 비율<input id="h3SolAttnStart" type="number" min="0" max="1" step="0.01" value="0.2" required><small>이 지점 전까지 Dense attention을 사용합니다.</small></label><label>종료 비율<input id="h3SolAttnEnd" type="number" min="0" max="1" step="0.01" value="0.9" required><small>이 지점 이후 Dense attention으로 돌아갑니다.</small></label><label>최소 토큰<input id="h3SolAttnMinTokens" type="number" min="0" max="1048576" step="512" value="4096" required><small>이보다 짧은 시퀀스는 Dense로 유지합니다.</small></label><label>H3 conditioning 보호<select id="h3SolAttnSink"><option value="exact_kv">exact_kv · KV만 정확 유지</option><option value="exact_kv_and_rows" selected>exact_kv_and_rows · 오디오 행 포함</option><option value="off">off · 보호 끔</option></select></label><label>Dense 블록<input id="h3SolAttnDenseBlocks" type="text" value="0-2,-1" maxlength="200" placeholder="예: 0-2,-1"><small>첫 3개와 마지막 블록처럼 정확 계산할 범위입니다.</small></label></div><div class="r2v-sol-attn-toggle-grid"><label class="toggle"><input id="h3SolAttnInt8Qk" type="checkbox"><span>INT8 QK 사용</span></label><label class="toggle"><input id="h3SolAttnInt8Pv" type="checkbox"><span>INT8 PV 사용 · QK 활성 시 적용</span></label></div><details class="r2v-sol-attn-advanced"><summary>고급 설정</summary><div class="r2v-sol-attn-grid"><label class="toggle"><input id="h3SolAttnMorton" type="checkbox"><span>Morton 토큰 재정렬</span></label><label>Morton 곡선<select id="h3SolAttnMortonCurve"><option value="2d_frame" selected>2d_frame · H3 권장</option><option value="3d">3d</option></select></label><label class="toggle"><input id="h3SolAttnVerbose" type="checkbox" checked><span>상세 실행 로그</span></label><label class="toggle"><input id="h3SolAttnUseTma" type="checkbox"><span>TMA 실험 경로 · SM90+</span></label></div></details></fieldset></details>
+      <div class="h3-prompt-variants">
+        <label class="h3-prompt-variant"><span><b>후보 A</b> · 사건 명료도 우선</span><textarea id="h3PromptInput" name="prompt_a" rows="12" required placeholder="원인→행동→반응→종료 상태가 명료한 전체 H3 프롬프트"></textarea></label>
+        <label class="h3-prompt-variant"><span><b>후보 B</b> · 긴장감과 규모 우선</span><textarea id="h3PromptInputB" name="prompt_b" rows="12" required placeholder="같은 사건을 긴장감과 공간 규모로 다르게 연출한 전체 H3 프롬프트"></textarea></label>
+        <label class="h3-prompt-variant"><span><b>후보 C</b> · 연속 동작과 카메라 우선</span><textarea id="h3PromptInputC" name="prompt_c" rows="12" required placeholder="같은 시작·종료 상태를 연속 동작과 카메라로 다르게 연출한 전체 H3 프롬프트"></textarea></label>
+      </div>
+      <div class="h3-reference-head">
+        <div>
+          <h3>Picture 참조 이미지</h3>
+          <p class="muted">1~9장 · 캐릭터, 배경, 소품 등 이 클립에 필요한 이미지만 순서대로 선택</p>
+        </div>
+        <button type="button" id="addH3Reference">Picture 추가</button>
+      </div>
+      <div id="h3References" class="h3-reference-list"></div>
+      <div class="create-actions">
+        <span id="h3QueueSummary" class="muted">H3 Worker 상태 확인 중…</span>
+        <button id="queueH3CandidatesWindows" class="primary alt" data-queue-lane="windows_candidate">Windows PC에서 H3 후보 생성</button>
+        <button id="queueH3CandidatesLocal" class="primary" data-queue-lane="local_generation">로컬 후보생성</button>
+      </div>
+    </form>
+  </section>
+
+  <section data-view="i2v-create" hidden>
+    <div class="heading">
+      <p class="eyebrow">MINIMAX H3 · FIRST-FRAME I2V PRODUCTION</p>
+      <h2>클립마다 시작 이미지 한 장으로 H3 I2V 후보를 생성합니다.</h2>
+      <p>프로젝트·씬·클립 흐름은 R2V와 동일하며, 각 클립의 첫 프레임 이미지를 영상 시작점으로 사용합니다.</p>
+    </div>
+    <div class="panel h3-project-loader">
+      <div class="model-test-head">
+        <div>
+          <h3>H3 I2V 프롬프트 프로젝트</h3>
+          <p class="muted">I2V 프로젝트의 씬과 클립을 선택하면 프롬프트·길이·시작 이미지를 불러옵니다.</p>
+        </div>
+        <button type="button" id="refreshI2VProjects">프로젝트 새로고침</button>
+      </div>
+      <div class="grid3">
+        <label>프로젝트<select id="i2vProject"><option value="">I2V 프로젝트 선택</option></select></label>
+        <label>씬<select id="i2vScene" disabled><option value="">씬 선택</option></select></label>
+        <label>클립<select id="i2vClip" disabled><option value="">클립 선택</option></select></label>
+      </div>
+      <details id="i2vSceneImagePreview" class="i2v-scene-image-preview" open hidden>
+        <summary>
+          <div>
+            <b>선택한 씬 전체 이미지 미리보기</b>
+            <small id="i2vSceneImagePreviewMeta">클립 순서대로 표시합니다.</small>
+          </div>
+          <span>접기 · 펼치기</span>
+        </summary>
+        <div id="i2vSceneImagePreviewGrid" class="i2v-scene-image-preview-grid"></div>
+      </details>
+      <div id="i2vProjectPreview" class="h3-project-preview muted">H3 I2V 프로젝트를 선택하세요.</div>
+      <button type="button" id="loadI2VProjectClip" class="primary" disabled>선택한 클립 입력 불러오기</button>
+      <div class="h3-scene-candidate-controls i2v-scene-candidate-controls">
+        <div><b>선택한 씬 전체 I2V 클립 등록</b><small id="i2vSceneCandidateMeta">프로젝트와 씬을 먼저 선택하세요.</small></div>
+        <label>워크플로우<select id="i2vSceneAdapter"><option value="">불러오는 중…</option></select></label>
+        <label>해상도<select id="i2vSceneResolution"><option value="1376x768">1376 × 768 · 고해상도</option><option value="1280x704" selected>1280 × 704 · 운영 기본</option><option value="832x480">832 × 480 · 빠른 확인</option></select></label>
+        <label>클립당 후보<select id="i2vSceneCandidateCount"><option value="1">1개</option><option value="2">2개</option><option value="3" selected>3개</option><option value="4">4개</option><option value="6">6개</option></select></label>
+        <button type="button" id="createI2VSceneTestSet" disabled>선택한 씬 I2V 테스트 등록</button>
+        <button type="button" id="queueI2VSceneCandidates" class="primary alt" disabled>Windows PC에서 씬 전체 I2V 후보 생성</button>
+      </div>
+    </div>
+    <form id="i2vCreateForm" class="panel h3-create-form">
+      <input type="hidden" name="source_project_id">
+      <input type="hidden" name="source_scene_id">
+      <input type="hidden" name="source_clip_id">
+      <div class="grid4">
+        <label>H3 I2V 워크플로우<select name="adapter_id" id="i2vAdapter" required><option value="">불러오는 중…</option></select></label>
+        <label>해상도<select name="resolution" id="i2vResolution" required><option value="1376x768">1376 × 768 · 고해상도</option><option value="1280x704" selected>1280 × 704 · 운영 기본</option><option value="832x480">832 × 480 · 빠른 확인</option></select></label>
+        <label>FPS<input value="24" readonly></label>
+        <label>영상 길이(초)<input name="duration_seconds" type="number" min="1" max="15" step="1" value="5" required></label>
+        <label>후보 개수<select name="candidate_count"><option value="1">1개</option><option value="2">2개</option><option value="3" selected>3개</option><option value="4">4개</option><option value="6">6개</option></select></label>
+        <label>Seed<input name="seed" type="number" value="-1"><small>−1이면 후보마다 랜덤 확정</small></label>
+      </div>
+      <label>실제 H3 I2V 영상 입력 프롬프트<textarea name="prompt" rows="12" required placeholder="시작 이미지에서 이어질 동작·카메라·오디오를 포함한 최종 H3 프롬프트"></textarea></label>
+      <div class="h3-reference-head"><div><h3>클립 시작 이미지</h3><p class="muted">클립마다 정확히 한 장 · 생성 영상의 첫 프레임으로 사용</p></div></div>
+      <div id="i2vStartImageBox" class="i2v-start-image-box" data-project-id="" data-clip-id="" data-picture-index="">
+        <div id="i2vLinkedStartImage" class="i2v-linked-start-image" hidden></div>
+        <label id="i2vStartImageUpload">시작 이미지 선택<input id="i2vStartImage" type="file" accept="image/png,image/jpeg,image/webp" required><small>PNG, JPEG, WEBP</small></label>
+        <button type="button" id="clearI2VLinkedStartImage" class="danger mini" hidden>프로젝트 이미지 해제 · 직접 업로드</button>
+      </div>
+      <div id="i2vLastImageSection" class="i2v-last-image-section" hidden>
+        <div class="h3-reference-head"><div><h3>클립 종료 이미지 · 선택</h3><p class="muted">FFLF 워크플로우에서만 사용 · 비워두면 종료 프레임 입력을 비활성화</p></div></div>
+        <div id="i2vLastImageBox" class="i2v-start-image-box" data-project-id="" data-clip-id="" data-picture-index="">
+          <div id="i2vLinkedLastImage" class="i2v-linked-start-image" hidden></div>
+          <label id="i2vLastImageUpload">종료 이미지 선택<input id="i2vLastImage" type="file" accept="image/png,image/jpeg,image/webp" disabled><small>선택 사항 · PNG, JPEG, WEBP</small></label>
+          <button type="button" id="clearI2VLinkedLastImage" class="danger mini" hidden>프로젝트 종료 이미지 해제 · 직접 업로드</button>
+        </div>
+      </div>
+      <div class="create-actions">
+        <span id="i2vQueueSummary" class="muted">H3 Worker 상태 확인 중…</span>
+        <button class="primary alt">Windows PC에서 H3 I2V 후보 생성</button>
+      </div>
+    </form>
+  </section>
+
+  <section data-view="queue" hidden>
+    <div class="heading">
+      <p class="eyebrow">H3 GENERATION QUEUE</p>
+      <h2>Windows 후보 큐와 로컬 생성 큐를 서로 독립적으로 실행합니다.</h2>
+      <p>01·02 후보 생성은 Windows에서, 05 해상도 재생성과 07·08 모델 테스트는 로컬에서 동시에 처리합니다.</p>
+    </div>
+    <div class="panel model-test-head">
+      <div><h3>Windows 후보 / 로컬 생성 · 독립 큐 상태</h3><p id="queueUpdated" class="muted">상태 불러오는 중…</p></div>
+      <button type="button" id="refreshH3State">새로고침</button>
+    </div>
+    <div id="activeBatch"></div>
+    <div id="queueMetrics"></div>
+    <div id="queueWork"></div>
+    <div id="queueProblems"></div>
+    <div id="pendingBatches"></div>
+    <details id="batchHistory" class="panel">
+      <summary><strong>완료된 H3 큐 그룹</strong></summary>
+      <div id="batchHistoryList"></div>
+    </details>
+  </section>
+
+  <section data-view="candidates" hidden>
+    <div class="heading">
+      <p class="eyebrow">H3 CANDIDATE SELECTION</p>
+      <h2>독립 생성된 H3 후보를 비교하고 클립당 하나를 선택합니다.</h2>
+      <p>세 후보가 모두 맞지 않으면 수정 의견만 저장하고, 이 대화에서 분석해 다음 D·E·F 전체 프롬프트를 작성·등록합니다.</p>
+    </div>
+    <div class="panel model-test-head">
+      <div><h3>H3 후보군</h3><p id="h3CandidateSummary" class="muted">완료된 후보만 재생하고 선택할 수 있습니다. 표시 시간은 큐 대기를 제외한 H3 Worker 처리 시간입니다.</p></div>
+      <div class="h3-candidate-review-controls">
+        <span id="h3CandidateAiReviewStatus" class="muted">로컬 AI 검수 상태 확인 중…</span>
+        <button type="button" id="h3CandidateAiReviewToggle">로컬 AI 검수 활성화</button>
+        <button type="button" id="refreshH3Candidates">새로고침</button>
+      </div>
+    </div>
+    <div class="panel h3-source-filters" aria-label="후보군 프로젝트 및 씬 필터">
+      <div><b>후보군 필터</b><small>원하는 프로젝트와 씬의 후보군만 표시합니다.</small></div>
+      <label>프로젝트<select id="h3CandidateProjectFilter"><option value="">전체 프로젝트</option></select></label>
+      <label>씬<select id="h3CandidateSceneFilter"><option value="">전체 씬</option></select></label>
+      <button type="button" id="resetH3CandidateFilters">필터 초기화</button>
+      <div class="h3-page-bulk-actions" aria-label="현재 후보 페이지 묶음 작업">
+        <button type="button" id="forceStopH3CandidatePage" disabled>페이지 큐 강제종료</button>
+        <button type="button" id="deleteH3CandidatePage" class="danger" disabled>페이지 후보삭제</button>
+      </div>
+    </div>
+    <nav id="h3CandidatesPaginationTop" class="h3-results-pagination h3-pagination-top" data-h3-candidates-pagination aria-label="후보군 위쪽 페이지" hidden></nav>
+    <div id="h3CandidateSets" class="h3-candidate-sets muted">등록된 H3 후보가 없습니다.</div>
+    <nav id="h3CandidatesPagination" class="h3-results-pagination" data-h3-candidates-pagination aria-label="후보군 아래쪽 페이지" hidden></nav>
+  </section>
+
+  <section data-view="results" hidden>
+    <div class="heading">
+      <p class="eyebrow">H3 SELECTED RESULTS</p>
+      <h2>선택을 완료한 H3 결과 영상을 후보별로 확인합니다.</h2>
+      <p>각 선택 후보와 해상도 재생성 결과를 한 카드에서 비교하고, R2V 결과는 동일 설정으로 더 높은 해상도에 다시 등록할 수 있습니다.</p>
+    </div>
+    <div class="panel model-test-head">
+      <div>
+        <h3>선택 완료 결과</h3>
+        <p id="h3SelectedResultSummary" class="muted">선택한 결과를 불러오는 중입니다.</p>
+      </div>
+      <button type="button" id="refreshH3Results">새로고침</button>
+    </div>
+    <div class="panel h3-source-filters" aria-label="선택 결과 프로젝트 및 씬 필터">
+      <div><b>결과 필터</b><small>선택한 후보 중 원하는 프로젝트와 씬만 표시합니다.</small></div>
+      <label>프로젝트<select id="h3ResultProjectFilter"><option value="">전체 프로젝트</option></select></label>
+      <label>씬<select id="h3ResultSceneFilter"><option value="">전체 씬</option></select></label>
+      <button type="button" id="resetH3ResultFilters">필터 초기화</button>
+    </div>
+    <p class="h3-result-time-note">Worker가 작업을 시작한 뒤 영상 저장까지의 내부 처리·ComfyUI 대기·생성 시간이며 H3 FIFO 큐 대기는 제외됩니다.</p>
+    <nav id="h3ResultsPaginationTop" class="h3-results-pagination h3-pagination-top" data-h3-results-pagination aria-label="선택 결과 위쪽 페이지" hidden></nav>
+    <div id="h3SelectedResults" class="h3-selected-results muted">선택을 완료한 H3 결과가 없습니다.</div>
+    <nav id="h3ResultsPagination" class="h3-results-pagination" data-h3-results-pagination aria-label="선택 결과 아래쪽 페이지" hidden></nav>
+  </section>
+<section data-view="model-management" hidden><div class="heading"><p class="eyebrow">MODEL MANAGEMENT</p><h2>모델과 워크플로우를 등록하고 역량을 관리합니다.</h2><p>I2V와 R2V 모델·워크플로우·어댑터를 한곳에서 관리하고, 실행 근거를 유형별 평가 차원으로 분석합니다.</p></div><div class="model-test-summary" id="modelManagementSummary"></div><div id="modelManagementForms" class="model-test-forms model-management-forms"></div><div id="modelManagementAnalysis"></div><div id="modelManagementComparison"></div></section>
+<section data-view="model-tests" hidden><div class="heading"><p class="eyebrow">MODEL BENCHMARK LAB</p><h2>일반 모델 테스트를 계획하고 검수합니다.</h2><p>일반 I2V 테스트 세션과 케이스·자산·결과만 관리합니다. 모델과 워크플로우 등록 및 역량 분석은 06 모델 관리에서 진행합니다.</p></div><div class="model-test-summary" id="modelTestSummary"></div><div class="model-test-forms"><form id="testModelForm" class="panel"><h3>1. 모델 프로필</h3><div class="grid2"><label>제작사<input name="provider" required placeholder="예: Black Forest Labs"></label><label>제품군<input name="family" required placeholder="예: FLUX"></label><label>표시 이름<input name="display_name" required placeholder="예: FLUX Video Open"></label><label>버전<input name="version" placeholder="공식 버전"></label></div><label>공식 출처 URL<input name="source_url" type="url" placeholder="모델 카드 또는 공식 발표"></label><label>라이선스<input name="license_name" placeholder="확인되지 않으면 비워 둠"></label><button class="primary">모델 등록</button></form><form id="testWorkflowForm" class="panel"><h3>2. 워크플로우 프로필</h3><label>모델<select name="model_id" id="testWorkflowModel" required></select></label><label>ComfyUI 워크플로우<select name="workflow_filename" id="testWorkflowFile" required></select></label><label>유형<select name="profile_kind"><option value="official_baseline">공식 기준선</option><option value="controlled_variant">통제 변형</option><option value="optimized_variant">프로젝트 최적화</option></select></label><label>프로필 이름<input name="name" required placeholder="공식 샘플 워크플로우"></label><label>공식 출처 URL<input name="source_url" type="url"></label><label>메모<textarea name="notes" placeholder="변경하지 않은 공식 기본값과 확인 사항"></textarea></label><button class="primary">워크플로우 등록</button></form><form id="testAdapterForm" class="panel"><h3>3. 워크플로우 어댑터</h3><label>워크플로우 프로필<select name="workflow_profile_id" id="testAdapterWorkflow" required></select></label><div class="grid2"><label>어댑터 이름<input name="adapter_name" value="Official bindings" required></label><label>버전<input name="adapter_version" value="1" required></label></div><label>프롬프트 템플릿<textarea name="prompt_template" required>{prompt}</textarea><small>{prompt}는 공통 영문 정규 프롬프트, {intent_ko}는 한국어 의도입니다.</small></label><button type="button" id="inspectTestWorkflow">입력 노드 검사</button><div id="testAdapterBindings" class="model-test-bindings muted">워크플로우를 선택하고 입력 노드를 검사하세요.</div><button class="primary">어댑터 검증 · 등록</button></form><form id="testSessionForm" class="panel"><h3>일반 테스트 세션</h3><label>모델<select name="model_id" id="testSessionModel" required></select></label><label>등록 워크플로우<select name="workflow_profile_id" id="testSessionWorkflow" required></select></label><label>검증된 어댑터<select name="adapter_id" id="testSessionAdapter" required></select></label><label>테스트 세트<select name="suite_id" id="testSessionSuite" required></select></label><label>출력 해상도<select name="resolution" id="testSessionResolution" required><option value="512x288">512 × 288 · 빠른 저해상도</option><option value="608x352">608 × 352 · H3 초고속 테스트</option><option value="768x432" selected>768 × 432 · 기본 비교</option><option value="832x480">832 × 480 · MiniMax H3 빠른 테스트</option><option value="960x544">960 × 544 · 중간 해상도</option><option value="1024x576">1024 × 576 · 16:9</option><option value="1280x704">1280 × 704 · 고품질 후보</option><option value="1280x736">1280 × 736 · H3 확장 고해상도</option><option value="1344x768">1344 × 768 · MiniMax H3 고품질</option><option value="1536x864">1536 × 864 · 고해상도</option></select><small>실행 계획에 고정되며 어댑터의 너비·높이 바인딩으로 전달됩니다.</small></label><label>케이스별 반복 횟수<input name="repetitions" type="number" min="1" max="10" value="1"></label><label>세션 메모<textarea name="notes" placeholder="1회 빠른 진단 후 필요한 케이스만 반복 권장"></textarea></label><button class="primary alt">실행 계획 생성</button></form></div><div class="panel"><div class="model-test-head"><div><h3>테스트 케이스</h3><p class="muted">공통 진단과 I2V 고정 앵커 세트의 입력·평가 기준만 표시됩니다. H3 R2V는 08 R2V 테스트에서 별도로 관리합니다.</p></div><div class="model-test-head-actions"><button type="button" id="toggleModelTestCases">공통 케이스 접기</button>
+<button type="button" id="refreshModelTests">새로고침</button></div></div><div id="modelTestCases" class="model-test-cases"></div></div><details id="modelTestSessionHistory" class="panel r2v-collapse-panel model-test-session-history"><summary class="r2v-collapse-summary"><div><h3>테스트 세션 이력</h3><p id="modelTestSessionHistoryMeta" class="muted">세션 이력을 불러오는 중입니다.</p></div><span class="r2v-collapse-state" aria-hidden="true"></span></summary><div class="r2v-collapse-body"><div id="modelTestSessions"></div><div id="modelTestPreflightActions" class="model-test-preflights"></div></div></details><div id="modelManagementAnalysisPanel" class="panel"><div class="model-test-head"><div><h3>역량 분석 · 프롬프트 정책</h3><p class="muted">사람 리뷰를 우선하고, 없으면 최신 AI 리뷰를 사용해 I2V·R2V 유형별 증거 수와 신뢰도를 표시합니다.</p></div><div class="model-test-export-actions"><button type="button" id="exportModelTestsJson">JSON 내보내기</button>
+<button type="button" id="exportModelTestsCsv">CSV 내보내기</button></div></div><div class="model-test-analysis-controls"><label>모델<select id="modelTestAnalysisModel"></select></label><label>워크플로우 범위<select id="modelTestAnalysisWorkflow"><option value="">워크플로우 선택</option></select></label><button type="button" id="runModelTestAnalysis" class="primary">분석 갱신</button></div><div id="modelTestAnalysis" class="model-test-analysis"><p class="muted">I2V 또는 R2V 모델과 워크플로우를 선택해 분석하세요.</p></div></div><div id="modelManagementComparisonPanel" class="panel"><h3>모델 · 워크플로우 비교</h3><p class="muted">I2V와 R2V 워크플로우를 모두 표시하며 각 유형의 최신 리뷰 점수를 집계합니다.</p><div id="modelTestComparison" class="model-test-comparison"></div></div><div class="panel"><h3>테스트 결과 검수</h3><p class="muted">세션 이력의 「결과 검수」를 눌러 케이스별 영상을 확인하세요.</p><div id="modelTestResults" class="model-test-results"></div></div></section>
 <section data-view="r2v-tests" hidden>
 <div class="heading"><p class="eyebrow">R2V BENCHMARK LAB</p><h2>공유 캐릭터 시트와 케이스별 장면 자산으로<br>MiniMax H3 R2V를 독립 검증합니다.</h2><p>일반 모델 테스트와 자산을 분리합니다. 캐릭터·배경·보조 인물·소품은 새로 등록하며 Picture 순서를 고정해 실행합니다.</p></div>
 <div class="model-test-summary" id="r2vTestSummary"></div>
-<div class="panel"><div class="model-test-head"><div><h3>R2V 전역 공유 이미지</h3><p class="muted">테스트 세트와 관계없이 동일 캐릭터·동일 스타일 슬롯에 사용합니다. 한 번 등록하면 연결된 모든 Picture에 같은 SHA 자산이 적용됩니다.</p></div></div><div id="r2vSharedAssets" class="r2v-shared-assets"></div></div>
-<form id="r2vTestSessionForm" class="panel r2v-test-session-form"><h3>R2V 테스트 세션</h3><div class="grid2"><label>MiniMax H3 모델<select name="model_id" id="r2vTestSessionModel" required></select></label><label>R2V 워크플로우<select name="workflow_profile_id" id="r2vTestSessionWorkflow" required></select></label><label>R2V 어댑터<select name="adapter_id" id="r2vTestSessionAdapter" required></select></label><label>R2V 테스트 세트<select name="suite_id" id="r2vTestSessionSuite" required></select></label><label>출력 해상도<input name="resolution" value="832x480" readonly><small>MiniMax H3 R2V 기준 832 × 480 고정</small></label><label>케이스별 반복 횟수<input name="repetitions" type="number" min="1" max="10" value="1"></label></div><label>세션 메모<textarea name="notes" placeholder="R2V 자산 구성과 검증 목적"></textarea></label><button class="primary alt">R2V 실행 계획 생성</button></form>
-<div class="panel"><div class="model-test-head"><div><h3>R2V 테스트 케이스 · 신규 자산 등록</h3><p class="muted">기존 R2V 자산 연결은 사용하지 않습니다. 각 Picture 역할에 새 이미지를 등록하세요. 스토리보드는 시간 순서대로 읽는 멀티패널 이미지로 등록합니다.</p></div><div class="model-test-head-actions"><button type="button" id="toggleR2VTestCases">R2V 케이스 접기</button><button type="button" id="refreshR2VTests">새로고침</button></div></div><div id="r2vTestCases" class="model-test-cases"></div></div>
+<details id="r2vSharedAssetsPanel" class="panel r2v-collapse-panel"><summary class="r2v-collapse-summary"><div><h3>R2V 전역 공유 이미지</h3><p class="muted">테스트 세트와 관계없이 동일 캐릭터·동일 스타일 슬롯에 사용합니다. 한 번 등록하면 연결된 모든 Picture에 같은 SHA 자산이 적용됩니다.</p></div><span class="r2v-collapse-state" aria-hidden="true"></span></summary><div class="r2v-collapse-body"><div id="r2vSharedAssets" class="r2v-shared-assets"></div></div></details>
+<form id="r2vTestSessionForm" class="panel r2v-test-session-form"><h3>R2V 테스트 세션</h3><div class="grid2"><label>MiniMax H3 모델<select name="model_id" id="r2vTestSessionModel" required></select></label><label>R2V 워크플로우<select name="workflow_profile_id" id="r2vTestSessionWorkflow" required></select></label><label>R2V 어댑터<select name="adapter_id" id="r2vTestSessionAdapter" required></select></label><label>R2V 테스트 세트<select name="suite_id" id="r2vTestSessionSuite" required></select></label><label>출력 해상도<select name="resolution" id="r2vTestSessionResolution" required><option value="608x352">608 × 352 · 초고속 테스트</option><option value="736x416">736 × 416 · 빠른 테스트</option><option value="832x480" selected>832 × 480 · 기준 테스트</option><option value="1280x736">1280 × 736 · 확장 고해상도</option></select><small>가로·세로 모두 MiniMax H3의 32배수 해상도입니다.</small></label><label>케이스별 반복 횟수<input name="repetitions" type="number" min="1" max="10" value="1"></label></div>
+<details id="r2vSolAttnPanel" class="r2v-sol-attn-panel" hidden><summary><div><b>Patch Sol-Attn 설정 · PINT8 전용</b><small>희소화 강도와 적용 구간을 세션 전체에 고정합니다.</small></div><span>펼쳐서 조정</span></summary><fieldset id="r2vSolAttnSettings" disabled><div class="r2v-sol-attn-grid"><label>희소화 임계값 · tau<input id="r2vSolAttnTau" type="number" min="0" max="4" step="0.05" value="1.3" required><small>높을수록 빠르고 희소해지며 품질 손실 가능성이 커집니다.</small></label><label>시작 비율<input id="r2vSolAttnStart" type="number" min="0" max="1" step="0.01" value="0.2" required><small>이 지점 전까지 Dense attention을 사용합니다.</small></label><label>종료 비율<input id="r2vSolAttnEnd" type="number" min="0" max="1" step="0.01" value="0.9" required><small>이 지점 이후 Dense attention으로 돌아갑니다.</small></label><label>최소 토큰<input id="r2vSolAttnMinTokens" type="number" min="0" max="1048576" step="512" value="4096" required><small>이보다 짧은 시퀀스는 Dense로 유지합니다.</small></label><label>H3 conditioning 보호<select id="r2vSolAttnSink"><option value="exact_kv">exact_kv · KV만 정확 유지</option><option value="exact_kv_and_rows" selected>exact_kv_and_rows · 오디오 행 포함</option><option value="off">off · 보호 끔</option></select></label><label>Dense 블록<input id="r2vSolAttnDenseBlocks" type="text" value="0-2,-1" maxlength="200" placeholder="예: 0-2,-1"><small>첫 3개와 마지막 블록처럼 정확 계산할 범위입니다.</small></label></div><div class="r2v-sol-attn-toggle-grid"><label class="toggle"><input id="r2vSolAttnInt8Qk" type="checkbox" checked><span>INT8 QK 사용</span></label><label class="toggle"><input id="r2vSolAttnInt8Pv" type="checkbox" checked><span>INT8 PV 사용 · QK 활성 시 적용</span></label></div><details class="r2v-sol-attn-advanced"><summary>고급 설정</summary><div class="r2v-sol-attn-grid"><label class="toggle"><input id="r2vSolAttnMorton" type="checkbox"><span>Morton 토큰 재정렬</span></label><label>Morton 곡선<select id="r2vSolAttnMortonCurve"><option value="2d_frame" selected>2d_frame · H3 권장</option><option value="3d">3d</option></select></label><label class="toggle"><input id="r2vSolAttnVerbose" type="checkbox" checked><span>상세 실행 로그</span></label><label class="toggle"><input id="r2vSolAttnUseTma" type="checkbox"><span>TMA 실험 경로 · SM90+</span></label></div></details></fieldset></details>
+<label>세션 메모<textarea name="notes" placeholder="R2V 자산 구성과 검증 목적"></textarea></label><button class="primary alt">R2V 실행 계획 생성</button></form>
+<div class="panel"><div class="model-test-head"><div><h3>R2V 테스트 케이스 · 신규 자산 등록</h3><p class="muted">기존 R2V 자산 연결은 사용하지 않습니다. 각 Picture 역할에 새 이미지를 등록하세요. 테스트 세트에 정의된 캐릭터·배경·소품 Picture 역할에 맞춰 이미지를 등록합니다.</p></div><div class="model-test-head-actions"><button type="button" id="toggleR2VTestCases">R2V 케이스 접기</button><button type="button" id="refreshR2VTests">새로고침</button></div></div><div id="r2vTestCases" class="model-test-cases"></div></div>
 <div class="panel"><h3>R2V 테스트 세션 이력</h3><div id="r2vTestSessions"></div><div id="r2vTestPreflightActions" class="model-test-preflights"></div></div>
-<div class="panel"><h3>R2V 테스트 결과 검수</h3><p class="muted">R2V 전용 AI 검수 v3가 참조 역할, 멀티패널 순서, 화자·대사·립싱크, 연속 샷과 패널 화면 누출을 각각 평가합니다. 불확실한 근거는 사람 확인 대상으로 남깁니다.</p><div id="r2vTestResults" class="model-test-results"></div></div>
+<div class="panel"><h3>R2V 테스트 결과 검수</h3><p class="muted">R2V AI 검수기는 스토리보드가 있을 때 패널 순서·행동 상태·감정선·접촉·종료 자세의 재현도를 우선 평가하고, 캐릭터 정체성·시간적 일관성과 카메라는 보조 항목으로 확인합니다. 스토리보드가 없는 테스트는 일반 참조 기반 기준을 사용합니다.</p><div id="r2vTestResults" class="model-test-results"></div></div>
 </section>
-<section data-view="automation" hidden><div class="heading"><p class="eyebrow">AUTOMATION</p><h2>검수·재생성 정책</h2></div><form id="settingsForm" class="panel"><label class="toggle"><input name="auto_review" type="checkbox" checked> AI 영상 자동 검수</label><label class="toggle"><input name="auto_modify" type="checkbox" checked> 검수 실패 시 자동 Retake</label><label class="toggle"><input name="auto_recheck" type="checkbox" checked> 수정본 재검수</label><label>최대 자동 수정 횟수<input name="max_modify_cycles" type="number" min="0" max="2" value="1"></label><label>큐 종료 유예(초)<input name="batch_idle_grace_seconds" type="number" min="3" max="300" value="10"></label><button class="primary">자동화 설정 저장</button></form></section></main><dialog id="modelTestReviewDialog" class="candidate-review-dialog"><form id="modelTestReviewForm"><div class="candidate-review-head"><div><p class="eyebrow">MODEL BENCHMARK REVIEW</p><h3 id="modelTestReviewTitle">테스트 결과 검수</h3><p id="modelTestReviewMeta" class="muted"></p></div><button type="button" id="modelTestReviewClose" class="mini">닫기</button></div><div class="model-test-review-video" id="modelTestReviewVideo"></div><div class="candidate-review-overview"><label>종합 판단<select name="verdict"><option value="unrated">판단 보류</option><option value="acceptable">사용 가능</option><option value="needs_improvement">개선 필요</option><option value="reject">사용 어려움</option></select></label><label>잘된 부분<textarea name="positive_note" rows="3"></textarea></label><label>종합 메모<textarea name="overall_note" rows="3"></textarea></label></div><h3>공통 평가 점수</h3><div id="modelTestReviewScores" class="model-test-score-grid"></div><div class="candidate-review-issues-head"><div><h3>발견한 문제</h3><p class="muted">관찰 사실과 원인 추정을 분리해 기록합니다.</p></div><button type="button" id="modelTestReviewAddIssue">문제 추가</button></div><div id="modelTestReviewIssues" class="candidate-review-issues"></div><div class="dialog-actions candidate-review-actions"><span id="modelTestReviewSaveStatus" class="muted"></span><button type="button" id="modelTestReviewCancel">나중에 계속 작성</button>
-<button type="submit" class="primary">리뷰 revision 저장</button></div></form></dialog><script src="/app.js?v=20260806-40"></script></body></html>
+
+</main>
+<dialog id="h3PicturePreviewDialog" class="h3-picture-preview-dialog" aria-labelledby="h3PicturePreviewTitle" aria-describedby="h3PicturePreviewMeta">
+  <div class="h3-candidate-video-head">
+    <div>
+      <p class="eyebrow">H3 PICTURE PREVIEW</p>
+      <h3 id="h3PicturePreviewTitle">Picture 참조 이미지</h3>
+      <p id="h3PicturePreviewMeta" class="muted"></p>
+    </div>
+    <button type="button" id="h3PicturePreviewClose" aria-label="Picture 이미지 닫기">닫기</button>
+  </div>
+  <div class="h3-picture-preview-stage"><img id="h3PicturePreviewImage" alt=""></div>
+</dialog>
+<dialog id="h3CandidateVideoDialog" class="h3-candidate-video-dialog" aria-labelledby="h3CandidateVideoTitle" aria-describedby="h3CandidateVideoMeta">
+  <div class="h3-candidate-video-head">
+    <div>
+      <p class="eyebrow">H3 VIDEO PREVIEW</p>
+      <h3 id="h3CandidateVideoTitle">H3 영상</h3>
+      <p id="h3CandidateVideoMeta" class="muted"></p>
+    </div>
+    <button type="button" id="h3CandidateVideoClose" aria-label="H3 영상 닫기">닫기</button>
+  </div>
+  <video id="h3CandidateVideo" controls preload="metadata" playsinline></video>
+</dialog>
+<dialog id="modelTestReviewDialog" class="candidate-review-dialog"><form id="modelTestReviewForm"><div class="candidate-review-head"><div><p class="eyebrow">MODEL BENCHMARK REVIEW</p><h3 id="modelTestReviewTitle">테스트 결과 검수</h3><p id="modelTestReviewMeta" class="muted"></p></div><button type="button" id="modelTestReviewClose" class="mini">닫기</button></div><div class="model-test-review-video" id="modelTestReviewVideo"></div><div class="candidate-review-overview"><label>종합 판단<select name="verdict"><option value="unrated">판단 보류</option><option value="acceptable">사용 가능</option><option value="needs_improvement">개선 필요</option><option value="reject">사용 어려움</option></select></label><label>잘된 부분<textarea name="positive_note" rows="3"></textarea></label><label>종합 메모<textarea name="overall_note" rows="3"></textarea></label></div><h3>공통 평가 점수</h3><div id="modelTestReviewScores" class="model-test-score-grid"></div><div class="candidate-review-issues-head"><div><h3>발견한 문제</h3><p class="muted">관찰 사실과 원인 추정을 분리해 기록합니다.</p></div><button type="button" id="modelTestReviewAddIssue">문제 추가</button></div><div id="modelTestReviewIssues" class="candidate-review-issues"></div><div class="dialog-actions candidate-review-actions"><span id="modelTestReviewSaveStatus" class="muted"></span><button type="button" id="modelTestReviewCancel">나중에 계속 작성</button><button type="submit" class="primary">리뷰 revision 저장</button></div></form></dialog>
+<script src="/app.js?v=20260822-98"></script>
+</body>
+</html>

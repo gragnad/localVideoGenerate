@@ -106,6 +106,39 @@ class ComfyClient:
         response.raise_for_status()
         return response.json()
 
+    @staticmethod
+    def _queue_contains(entries: Any, prompt_id: str) -> bool:
+        for entry in entries or []:
+            if isinstance(entry, (list, tuple)) and any(
+                str(value) == prompt_id for value in entry[:3]
+            ):
+                return True
+            if isinstance(entry, dict) and str(entry.get("prompt_id") or "") == prompt_id:
+                return True
+        return False
+
+    def cancel_prompt(self, prompt_id: str) -> dict[str, bool]:
+        """Cancel one pending/running prompt without clearing unrelated work."""
+        prompt_id = str(prompt_id or "").strip()
+        if not prompt_id:
+            return {"pending_deleted": False, "running_interrupted": False}
+        queue = self.get_queue()
+        pending = self._queue_contains(queue.get("queue_pending"), prompt_id)
+        running = self._queue_contains(queue.get("queue_running"), prompt_id)
+        if pending:
+            response = self.session.post(
+                self._url("/queue"),
+                json={"delete": [prompt_id]},
+                timeout=self.request_timeout,
+            )
+            response.raise_for_status()
+        if running:
+            response = self.session.post(
+                self._url("/interrupt"), timeout=self.request_timeout
+            )
+            response.raise_for_status()
+        return {"pending_deleted": pending, "running_interrupted": running}
+
     def wait_for_completion(
         self,
         prompt_id: str,

@@ -1,0 +1,18 @@
+[Unit]
+Description=NAL Studio H3 video UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/nalstudio/local-ai/video-engine
+EnvironmentFile=%h/.config/h3-video-engine/runtime.env
+Environment=VIDEO_ENGINE_ROOT=/home/nalstudio/local-ai/video-engine
+ExecStart=/usr/bin/node /home/nalstudio/local-ai/video-engine/web/server.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillSignal=SIGINT
+
+[Install]
+WantedBy=default.target

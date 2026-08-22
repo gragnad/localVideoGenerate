@@ -8,6 +8,7 @@ import benchmark_jobs
 from job_queue import read_json
 import model_test_analysis
 import model_test_exports
+import model_test_r2v
 import model_test_registry
 import model_test_reviews
 import tests.test_benchmark_jobs as benchmark_fixture
@@ -15,12 +16,17 @@ import tests.test_benchmark_jobs as benchmark_fixture
 
 class ModelTestAnalysisTest(unittest.TestCase):
     def setUp(self):
-        self.fixture = benchmark_fixture.BenchmarkJobsTest(methodName="test_schema_v5_contains_session_batch_link")
+        self.fixture = benchmark_fixture.BenchmarkJobsTest(methodName="test_schema_v10_has_no_batch_link_table")
         self.fixture.setUp()
         self.root = self.fixture.root
         self.source_session_id = self.fixture.session_id
         queued = benchmark_jobs.queue_session(self.root, self.source_session_id)
-        self.requests = [read_json(self.root / "jobs" / job_id / "request.json", {}) for job_id in queued["job_ids"]]
+        self.requests = [
+            read_json(
+                self.root / "runtime/h3/jobs" / job_id / "request.json", {}
+            )
+            for job_id in queued["job_ids"]
+        ]
         self.request = self.requests[0]
         benchmark_jobs.record_result(
             self.root,
@@ -67,6 +73,30 @@ class ModelTestAnalysisTest(unittest.TestCase):
         self.assertEqual(candidate["evidence_run_ids"], [self.request["run_id"]])
         weak_case = next(row for row in result["cases"] if row["case_version_id"] == self.request["case_version_id"])
         self.assertTrue(weak_case["needs_more_evidence"])
+
+    def test_r2v_workflow_uses_only_r2v_capability_dimensions(self):
+        for filename in model_test_r2v.R2V_WORKFLOW_FILENAMES:
+            with self.subTest(filename=filename):
+                with model_test_registry.open_registry(self.root) as connection:
+                    connection.execute(
+                        "UPDATE workflow_profiles SET workflow_filename=? WHERE workflow_profile_id=?",
+                        (filename, self.workflow_profile_id),
+                    )
+                result = model_test_analysis.analyze(
+                    self.root, self.model_id, self.workflow_profile_id
+                )
+                self.assertEqual(result["input_mode"], "h3_r2v_multi_reference")
+                self.assertEqual(
+                    {row["dimension"] for row in result["dimensions"]},
+                    set(model_test_reviews.R2V_SCORE_DIMENSIONS),
+                )
+                self.assertNotIn(
+                    "prompt_adherence",
+                    {row["dimension"] for row in result["dimensions"]},
+                )
+                self.assertEqual(
+                    result["issues"][0]["dimension"], "camera_control"
+                )
 
     def test_policy_requires_review_evidence_and_can_be_deactivated(self):
         with self.assertRaisesRegex(ValueError, "근거 실행"):
