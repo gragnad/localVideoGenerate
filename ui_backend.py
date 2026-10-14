@@ -9,16 +9,21 @@ from pathlib import Path
 from typing import Any, Callable
 
 import benchmark_jobs
-import candidate_review_queue
 import h3_prompt_projects
+import h3_frame_export as h3_frame_export_module
+import h3_frame_annotations
 import h3_queue
 import model_test_analysis
 import model_test_assets
 import model_test_exports
 import model_test_registry
-import model_test_review_queue
 import model_test_reviews
+import windows_power_policy
 import workflow_adapter
+import action_assets
+from job_queue import read_json
+from remote_render_power import Config as RemoteRenderPowerConfig
+from remote_render_power import RemoteRenderPowerManager
 
 
 HOME = Path.home()
@@ -40,13 +45,57 @@ def h3_config(_data: dict[str, Any]) -> dict[str, Any]:
 
 
 def h3_state(_data: dict[str, Any]) -> dict[str, Any]:
-    return h3_queue.state(ROOT)
+    return h3_queue.state(ROOT, compact=True)
 
 
-def set_h3_candidate_ai_review(data: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(data.get("enabled"), bool):
-        raise ValueError("후보 AI 검수 enabled 값은 true 또는 false여야 합니다.")
-    return candidate_review_queue.set_enabled(ROOT, bool(data["enabled"]))
+def get_windows_power_policy(_data: dict[str, Any]) -> dict[str, Any]:
+    return windows_power_policy.get_policy(ROOT)
+
+
+def set_windows_power_policy(data: dict[str, Any]) -> dict[str, Any]:
+    return windows_power_policy.set_policy(ROOT, data.get("auto_hibernate_enabled"))
+
+
+def control_windows_render_power(data: dict[str, Any]) -> dict[str, Any]:
+    action = str(data.get("action") or "").strip().lower()
+    if action not in {"wake", "hibernate"} or data.get("confirm") != action:
+        raise ValueError("Windows PC 전원 명령 확인 값이 올바르지 않습니다.")
+    manager = RemoteRenderPowerManager(RemoteRenderPowerConfig.from_env())
+    if action == "wake":
+        return manager.manual_wake()
+
+    active_jobs = []
+    jobs_root = h3_queue.roots(ROOT)["jobs"]
+    if jobs_root.is_dir():
+        for directory in jobs_root.iterdir():
+            if not directory.is_dir():
+                continue
+            request = read_json(directory / "request.json", {}) or {}
+            status = read_json(directory / "status.json", {}) or {}
+            state = str(status.get("status") or "missing")
+            remote_lane = (
+                request.get("queue_lane") == "windows_candidate"
+                or request.get("render_target") == "windows_comfy"
+            )
+            if remote_lane and state not in h3_queue.TERMINAL:
+                active_jobs.append(directory.name)
+    if active_jobs:
+        raise ValueError(
+            f"Windows 후보 큐에 미완료 작업 {len(active_jobs)}개가 있어 최대 절전할 수 없습니다."
+        )
+    return manager.manual_hibernate()
+
+
+def h3_candidate_page(data: dict[str, Any]) -> dict[str, Any]:
+    return h3_queue.candidate_page(ROOT, data)
+
+
+def h3_results_page(data: dict[str, Any]) -> dict[str, Any]:
+    return h3_queue.results_page(ROOT, data)
+
+
+def h3_clip_versions(data: dict[str, Any]) -> dict[str, Any]:
+    return h3_queue.clip_versions(ROOT, data)
 
 
 def create_h3_candidate_set(data: dict[str, Any]) -> dict[str, Any]:
@@ -132,6 +181,7 @@ def restore_h3_candidate_version(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def create_h3_resolution_rerender(data: dict[str, Any]) -> dict[str, Any]:
+    model_test_registry.ensure_h3_r2v_adapter(ROOT, WORKFLOW_DIR)
     return h3_queue.enqueue_selected_candidate_rerender(
         ROOT,
         str(data.get("candidate_set_id") or ""),
@@ -168,6 +218,67 @@ def h3_video(data: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def h3_frame_export(data: dict[str, Any]) -> dict[str, Any]:
+    return h3_frame_export_module.export_frames(
+        ROOT, str(data.get("job_id") or ""), data.get("interval")
+    )
+
+
+def h3_frame_selection_zip(data: dict[str, Any]) -> dict[str, Any]:
+    return h3_frame_export_module.selection_zip(
+        ROOT,
+        str(data.get("job_id") or ""),
+        str(data.get("tag") or ""),
+        data.get("filenames"),
+        labeled=bool(data.get("labeled")),
+    )
+
+
+def h3_frame_export_file(data: dict[str, Any]) -> dict[str, str]:
+    return {
+        "path": str(h3_frame_export_module.export_file(
+            ROOT,
+            str(data.get("job_id") or ""),
+            str(data.get("tag") or ""),
+            str(data.get("filename") or ""),
+        ))
+    }
+
+
+def h3_action_assets(_data: dict[str, Any]) -> dict[str, Any]:
+    return action_assets.list_assets(ROOT, include_archived=True)
+
+
+def register_h3_action_asset(data: dict[str, Any]) -> dict[str, Any]:
+    return action_assets.register_external(ROOT, data)
+
+
+def register_h3_rerender_action_asset(data: dict[str, Any]) -> dict[str, Any]:
+    return action_assets.register_rerender(ROOT, data)
+
+
+def update_h3_action_asset(data: dict[str, Any]) -> dict[str, Any]:
+    return action_assets.update_asset(
+        ROOT,
+        str(data.get("action_asset_id") or ""),
+        data,
+    )
+
+
+def delete_h3_action_asset(data: dict[str, Any]) -> dict[str, Any]:
+    return action_assets.delete_asset(ROOT, str(data.get("action_asset_id") or ""))
+
+
+def h3_action_asset_media(data: dict[str, Any]) -> dict[str, str]:
+    return {
+        "path": str(action_assets.media_path(
+            ROOT,
+            str(data.get("action_asset_id") or ""),
+            str(data.get("kind") or "h3"),
+        ))
+    }
+
+
 def h3_projects(_data: dict[str, Any]) -> dict[str, Any]:
     return h3_prompt_projects.list_projects(ROOT)
 
@@ -201,6 +312,18 @@ def h3_project_picture(data: dict[str, Any]) -> dict[str, str]:
                 ROOT,
                 str(data.get("project_id") or ""),
                 str(data.get("clip_id") or ""),
+                int(data.get("picture_index") or 0),
+            )
+        )
+    }
+
+
+def h3_candidate_reference(data: dict[str, Any]) -> dict[str, str]:
+    return {
+        "path": str(
+            h3_queue.candidate_reference_path(
+                ROOT,
+                str(data.get("candidate_set_id") or ""),
                 int(data.get("picture_index") or 0),
             )
         )
@@ -283,18 +406,6 @@ def queue_model_test_session(data: dict[str, Any]) -> dict[str, Any]:
     return benchmark_jobs.queue_session(ROOT, str(data.get("session_id") or ""))
 
 
-def queue_model_test_ai_review(data: dict[str, Any]) -> dict[str, Any]:
-    return model_test_review_queue.enqueue(
-        ROOT, str(data.get("session_id") or "")
-    )
-
-
-def cancel_model_test_ai_review(data: dict[str, Any]) -> dict[str, Any]:
-    return model_test_review_queue.cancel(
-        ROOT, str(data.get("session_id") or "")
-    )
-
-
 def model_test_session_results(data: dict[str, Any]) -> dict[str, Any]:
     return model_test_reviews.session_results(
         ROOT, str(data.get("session_id") or "")
@@ -349,7 +460,12 @@ Action = Callable[[dict[str, Any]], dict[str, Any]]
 ACTIONS: dict[str, Action] = {
     "h3_config": h3_config,
     "h3_state": h3_state,
-    "set_h3_candidate_ai_review": set_h3_candidate_ai_review,
+    "control_windows_render_power": control_windows_render_power,
+    "get_windows_power_policy": get_windows_power_policy,
+    "set_windows_power_policy": set_windows_power_policy,
+    "h3_candidate_page": h3_candidate_page,
+    "h3_results_page": h3_results_page,
+    "h3_clip_versions": h3_clip_versions,
     "create_h3_candidate_set": create_h3_candidate_set,
     "create_h3_project_test_set": create_h3_project_test_set,
     "queue_h3_project_test_set": queue_h3_project_test_set,
@@ -367,11 +483,25 @@ ACTIONS: dict[str, Action] = {
     "clear_h3_candidate_selection": clear_h3_candidate_selection,
     "delete_h3_candidate_set": delete_h3_candidate_set,
     "h3_video": h3_video,
+    "h3_frame_annotation_list": lambda data: h3_frame_annotations.listing(ROOT, data),
+    "h3_frame_annotation_load": lambda data: h3_frame_annotations.load(ROOT, data),
+    "h3_frame_annotation_save": lambda data: h3_frame_annotations.save(ROOT, data),
+    "h3_frame_annotation_image": lambda data: h3_frame_annotations.image_file(ROOT, data),
+    "h3_frame_export": h3_frame_export,
+    "h3_frame_export_file": h3_frame_export_file,
+    "h3_frame_selection_zip": h3_frame_selection_zip,
+    "h3_action_assets": h3_action_assets,
+    "register_h3_action_asset": register_h3_action_asset,
+    "register_h3_rerender_action_asset": register_h3_rerender_action_asset,
+    "update_h3_action_asset": update_h3_action_asset,
+    "delete_h3_action_asset": delete_h3_action_asset,
+    "h3_action_asset_media": h3_action_asset_media,
     "h3_projects": h3_projects,
     "delete_h3_project": delete_h3_project,
     "h3_project_clips": h3_project_clips,
     "h3_project_clip": h3_project_clip,
     "h3_project_picture": h3_project_picture,
+    "h3_candidate_reference": h3_candidate_reference,
     "model_test_dashboard": model_test_dashboard,
     "register_test_model": register_test_model,
     "register_test_workflow": register_test_workflow,
@@ -386,8 +516,6 @@ ACTIONS: dict[str, Action] = {
     "model_test_asset_file": model_test_asset_file,
     "preflight_model_test_session": preflight_model_test_session,
     "queue_model_test_session": queue_model_test_session,
-    "queue_model_test_ai_review": queue_model_test_ai_review,
-    "cancel_model_test_ai_review": cancel_model_test_ai_review,
     "model_test_session_results": model_test_session_results,
     "model_test_run_review": model_test_run_review,
     "model_test_comparison": model_test_comparison,

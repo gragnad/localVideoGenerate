@@ -23,6 +23,7 @@ import model_test_r2v
 import workflow_adapter
 import h3_prompt_projects
 import h3_prompt_contract
+import action_assets
 from comfy_client import ComfyClient
 from job_queue import atomic_write_json, now_iso, queue_claim_lock, read_json, update_status
 
@@ -34,7 +35,7 @@ R2V_OUTPUT_RESOLUTIONS = {
     (608, 352), (832, 480), (960, 544), (1280, 704), (1280, 736),
 }
 R2V_RERENDER_RESOLUTIONS = R2V_OUTPUT_RESOLUTIONS | {(1024, 576)}
-I2V_OUTPUT_RESOLUTIONS = {(832, 480), (1280, 704), (1376, 768)}
+I2V_OUTPUT_RESOLUTIONS = {(832, 480), (1280, 704), (1376, 768), (576, 1024)}
 H3_SOL_ATTN_DEFAULT_OVERRIDES = {
     "int8_qk": False,
     "int8_pv": False,
@@ -45,6 +46,9 @@ WINDOWS_UPSCALE_WORKFLOW_PATH = (
     / "deploy/windows-render-agent/rtx_1080p60_h264_api.json"
 )
 WINDOWS_UPSCALE_WORKFLOW_VERSION = "rtx_rife_1080p60_h264_v1"
+EMBEDDING_EFFECT_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_])embedding:([^\s,;]+)", re.IGNORECASE
+)
 
 
 def prompt_revision_authoring_config() -> dict[str, Any]:
@@ -62,28 +66,74 @@ def candidate_render_config() -> dict[str, Any]:
     comfy_url = (
         configured
         or str(os.environ.get("COMFY_URL") or "").strip()
-        or "http://127.0.0.1:8188"
+        or WINDOWS_COMFY_FALLBACK
     ).rstrip("/")
     parsed = urlparse(comfy_url)
     hostname = str(parsed.hostname or "").lower()
-    remote = hostname not in {"", "127.0.0.1", "localhost", "::1"}
+    remote = hostname not in LOCAL_HOSTNAMES
     return {
-        "mode": "remote_windows_comfy" if configured and remote else "local_comfy",
+        "mode": "remote_windows_comfy" if remote else "local_comfy",
         "comfy_url": comfy_url,
-        "remote_configured": bool(configured and remote),
+        "remote_configured": bool(remote),
     }
 
 
+WINDOWS_COMFY_FALLBACK = "http://100.78.202.37:8189"
+LOCAL_COMFY_FALLBACK = "http://127.0.0.1:8188"
+LOCAL_HOSTNAMES = {"", "127.0.0.1", "localhost", "::1"}
+
+
 def _candidate_comfy_url(data: dict[str, Any]) -> str:
-    value = str(
-        os.environ.get("H3_CANDIDATE_COMFY_URL")
-        or data.get("comfy_url")
-        or os.environ.get("COMFY_URL")
-        or "http://127.0.0.1:8188"
-    ).strip().rstrip("/")
+    """Resolve ComfyUI URL with queue_lane-first logic.
+
+    Queue lane is determined FIRST, then address is validated against lane rules.
+    Windows lane: must use approved Windows address, rejects local addresses.
+    Local lane: uses local address, no Windows fallback.
+    """
+    lane = str(data.get("queue_lane") or "").strip()
+
+    # Determine expected address based on lane FIRST
+    if lane == "windows_candidate":
+        candidates = [
+            str(os.environ.get("H3_CANDIDATE_COMFY_URL") or "").strip(),
+            str(data.get("comfy_url") or "").strip(),
+            WINDOWS_COMFY_FALLBACK,
+        ]
+    elif lane == "local_generation":
+        candidates = [
+            str(os.environ.get("COMFY_URL") or "").strip(),
+            LOCAL_COMFY_FALLBACK,
+        ]
+    else:
+        candidates = [
+            str(os.environ.get("H3_CANDIDATE_COMFY_URL") or "").strip(),
+            str(data.get("comfy_url") or "").strip(),
+            WINDOWS_COMFY_FALLBACK,
+        ]
+
+    value = ""
+    for c in candidates:
+        if c:
+            value = c.rstrip("/")
+            break
+
+    if not value:
+        raise ValueError("ComfyUI 주소를 확인할 수 없습니다.")
+
     parsed = urlparse(value)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("후보 영상 ComfyUI 주소는 올바른 HTTP(S) URL이어야 합니다.")
+
+    hostname = str(parsed.hostname or "").lower()
+
+    # Windows lane rejects local addresses explicitly
+    if lane == "windows_candidate" or (not lane and hostname not in LOCAL_HOSTNAMES):
+        if hostname in LOCAL_HOSTNAMES:
+            raise ValueError(
+                f"Windows 큐에는 로컬 주소({hostname})를 사용할 수 없습니다. "
+                f"Windows ComfyUI 주소({WINDOWS_COMFY_FALLBACK})를 사용하세요."
+            )
+
     return value
 
 
@@ -97,20 +147,52 @@ def _production_workflow_settings(
         raw_values = dict(raw)
     else:
         raise ValueError("H3 워크플로우 설정 형식이 올바르지 않습니다.")
-    unknown = set(raw_values) - {"sol_attn"}
+    unknown = set(raw_values) - {"sol_attn", "semantic_reference_indexes"}
     if unknown:
         raise ValueError(
             "지원하지 않는 H3 워크플로우 설정입니다: "
             + ", ".join(sorted(unknown))
         )
 
+    raw_semantic_indexes = raw_values.get("semantic_reference_indexes") or []
+    if not isinstance(raw_semantic_indexes, list):
+        raise ValueError("의미 전용 H3 참조 번호는 배열이어야 합니다.")
+    try:
+        semantic_indexes = sorted({int(value) for value in raw_semantic_indexes})
+    except (TypeError, ValueError) as exc:
+        raise ValueError("의미 전용 H3 참조 번호는 숫자여야 합니다.") from exc
+    if any(index < 1 or index > 9 for index in semantic_indexes):
+        raise ValueError("의미 전용 H3 참조 번호는 Picture 1~9여야 합니다.")
+    conditioners = [
+        node
+        for node in workflow.values()
+        if str(node.get("class_type") or "") == "MiniMaxH3ReferenceToVideo"
+    ]
+    if semantic_indexes:
+        if len(conditioners) != 1:
+            raise ValueError("MiniMax H3 Ref2VA 컨디셔닝 노드를 하나만 사용해야 합니다.")
+        conditioners[0].setdefault("inputs", {})["semantic_ref_indexes"] = ",".join(
+            str(index) for index in semantic_indexes
+        )
+    else:
+        # Current ComfyUI declares this string input as required even when the
+        # workflow uses every Picture as a visual reference.
+        for conditioner in conditioners:
+            conditioner.setdefault("inputs", {}).setdefault(
+                "semantic_ref_indexes", ""
+            )
+
     supports_sol_attn = workflow_adapter.has_sol_attn_patch(workflow)
     if not supports_sol_attn:
-        if raw_values:
+        if "sol_attn" in raw_values:
             raise ValueError(
                 "Patch Sol-Attn 설정은 Sol-Attn R2V 워크플로우에서만 사용할 수 있습니다."
             )
-        return {}
+        return (
+            {"semantic_reference_indexes": semantic_indexes}
+            if semantic_indexes
+            else {}
+        )
 
     raw_sol_attn = raw_values.get("sol_attn")
     if raw_sol_attn is None:
@@ -119,10 +201,41 @@ def _production_workflow_settings(
         raise ValueError("Patch Sol-Attn 설정 형식이 올바르지 않습니다.")
     effective = {**H3_SOL_ATTN_DEFAULT_OVERRIDES, **raw_sol_attn}
     return {
+        **(
+            {"semantic_reference_indexes": semantic_indexes}
+            if semantic_indexes
+            else {}
+        ),
         "sol_attn": workflow_adapter.apply_sol_attn_settings(
             workflow, effective
         )
     }
+
+
+def _linked_reference_settings(root: Path, references: list, raw: Any = None) -> dict:
+    """Preserve project semantic-only roles after reference removal/reordering."""
+    if raw is not None and not isinstance(raw, dict):
+        raise ValueError("H3 워크플로우 설정 형식이 올바르지 않습니다.")
+    settings = copy.deepcopy(raw or {})
+    indexes = settings.get("semantic_reference_indexes") or []
+    if not isinstance(indexes, list):
+        raise ValueError("의미 전용 H3 참조 번호는 배열이어야 합니다.")
+    indexes = {int(value) for value in indexes}
+    cache = {}
+    for index, reference in enumerate(references, 1):
+        project_id, clip_id = reference.get("project_id"), reference.get("clip_id")
+        picture = reference.get("project_picture_index")
+        if not (project_id and clip_id and picture):
+            continue
+        key = (project_id, clip_id)
+        if key not in cache:
+            clip = h3_prompt_projects.load_clip(root, project_id, clip_id)
+            cache[key] = (clip.get("workflow_settings") or {}).get("semantic_reference_indexes") or []
+        if int(picture) in cache[key]:
+            indexes.add(index)
+    if indexes or "semantic_reference_indexes" in settings:
+        settings["semantic_reference_indexes"] = sorted(indexes)
+    return settings
 
 
 def roots(root: Path) -> dict[str, Path]:
@@ -196,6 +309,7 @@ def available_adapters(root: Path) -> dict[str, Any]:
             continue
         config = json.loads(row["config_json"] or "{}")
         multi = dict(config.get("multi_reference") or {})
+        action_reference = dict(config.get("action_reference") or {})
         bindings = dict(config.get("bindings") or {})
         if multi:
             generation_mode = "r2v"
@@ -221,6 +335,8 @@ def available_adapters(root: Path) -> dict[str, Any]:
             "required_references": 1,
             "supports_last_frame": bool(bindings.get("last_reference_image")),
             "max_references": max_references,
+            "supports_action_reference": bool(action_reference),
+            "max_action_references": 1 if action_reference else 0,
             "sol_attn_configurable": row["workflow_profile_id"] in sol_attn_defaults,
             "sol_attn_defaults": sol_attn_defaults.get(row["workflow_profile_id"]),
         })
@@ -244,6 +360,34 @@ def available_adapters(root: Path) -> dict[str, Any]:
     }
 
 
+def _current_default_r2v_adapter(root: Path) -> dict[str, Any]:
+    adapters = [
+        row for row in available_adapters(root)["adapters"]
+        if row.get("generation_mode") == "r2v"
+        and row.get("default_for_generation") is True
+    ]
+    if not adapters:
+        raise ValueError("현재 기본 H3 R2V 워크플로우가 등록되지 않았습니다.")
+    return sorted(
+        adapters,
+        key=lambda row: (
+            str(row.get("model_name") or ""),
+            str(row.get("adapter_id") or ""),
+        ),
+    )[0]
+
+
+def _current_action_r2v_adapter(root: Path) -> dict[str, Any]:
+    adapters = [
+        row for row in available_adapters(root)["adapters"]
+        if row.get("generation_mode") == "r2v"
+        and row.get("supports_action_reference") is True
+    ]
+    if not adapters:
+        raise ValueError("H3 motion_only 액션 참조 워크플로우가 등록되지 않았습니다.")
+    return sorted(adapters, key=lambda row: str(row.get("adapter_id") or ""))[0]
+
+
 def _compile_workflow(
     root: Path,
     adapter_id: str,
@@ -251,6 +395,7 @@ def _compile_workflow(
     reference_count: int,
     expected_generation_mode: str | None = None,
     workflow_settings: Any = None,
+    action_reference_count: int = 0,
 ) -> tuple[dict[str, Any], list[dict[str, str]], dict[str, Any]]:
     with model_test_registry.open_registry(root) as connection:
         adapter = connection.execute(
@@ -286,6 +431,9 @@ def _compile_workflow(
     config = json.loads(adapter["config_json"] or "{}")
     bindings = workflow_adapter.validate_bindings(workflow, dict(config.get("bindings") or {}))
     multi = workflow_adapter._validate_multi_reference(workflow, config.get("multi_reference"))
+    action_reference = workflow_adapter.validate_action_reference(
+        workflow, config.get("action_reference")
+    )
     generation_mode = "r2v" if multi else "i2v" if bindings.get("reference_image") else ""
     if not generation_mode:
         raise ValueError("선택한 어댑터는 H3 이미지 기반 생성을 지원하지 않습니다.")
@@ -297,6 +445,11 @@ def _compile_workflow(
         reference_count < 1 or reference_count > int(multi["max_slots"])
     ):
         raise ValueError(f"참조 이미지는 1~{multi['max_slots']}장이어야 합니다.")
+    if action_reference:
+        if action_reference_count != 1:
+            raise ValueError("액션 참조 워크플로우에는 motion_only 액션 비디오 한 개가 필요합니다.")
+    elif action_reference_count:
+        raise ValueError("선택한 R2V 워크플로우는 액션 비디오 참조를 지원하지 않습니다.")
     last_reference_binding = bindings.get("last_reference_image")
     if generation_mode == "i2v":
         valid_counts = {1, 2} if last_reference_binding else {1}
@@ -308,6 +461,11 @@ def _compile_workflow(
     effective_workflow_settings = _production_workflow_settings(
         compiled, workflow_settings
     )
+    semantic_reference_indexes = list(
+        effective_workflow_settings.get("semantic_reference_indexes") or []
+    )
+    if any(index > reference_count for index in semantic_reference_indexes):
+        raise ValueError("의미 전용 H3 참조 번호가 등록된 Picture 개수를 벗어났습니다.")
     prompt_template = str(config.get("prompt_template") or "{prompt}")
     applied = {**dict(config.get("defaults") or {}), **values}
     applied["prompt"] = prompt_template.replace("{prompt}", str(values["prompt"])).replace("{intent_ko}", "")
@@ -340,7 +498,27 @@ def _compile_workflow(
                 source_node_id,
                 0,
             ]
-            patches.append({"node_id": loader_id, "input": multi["loader_input"]})
+            # Keep the legacy image patch shape byte-for-byte compatible with
+            # existing requests. Workers treat an absent media_type as image.
+            patches.append({
+                "node_id": loader_id,
+                "input": multi["loader_input"],
+            })
+        if action_reference:
+            video_loader = compiled[action_reference["loader_node_id"]]
+            video_loader["inputs"][action_reference["loader_input"]] = (
+                "__H3_ACTION_VIDEO_1__"
+            )
+            conditioner[action_reference["conditioning_input"]] = [
+                action_reference["loader_node_id"],
+                0,
+            ]
+            patches.append({
+                "node_id": action_reference["loader_node_id"],
+                "input": action_reference["loader_input"],
+                "media_type": "video",
+                "video_index": 1,
+            })
     else:
         binding = bindings["reference_image"]
         compiled[binding["node_id"]]["inputs"][binding["input"]] = "__H3_START_IMAGE__"
@@ -366,6 +544,7 @@ def _compile_workflow(
         "workflow_filename": profile["workflow_filename"],
         "generation_mode": generation_mode,
         "workflow_settings": effective_workflow_settings,
+        "supports_action_reference": bool(action_reference),
     }
 
 
@@ -409,6 +588,40 @@ def _normalize_generation_variants(
     ], True)
 
 
+def _validate_action_prompt(
+    prompt: str,
+    *,
+    participant_count: int,
+    participant_mapping: dict[str, Any],
+) -> None:
+    video_numbers = {
+        int(value)
+        for value in re.findall(r"<Video\s+(\d+)>", prompt, re.IGNORECASE)
+    }
+    if video_numbers != {1}:
+        if not video_numbers:
+            raise ValueError(
+                "액션 자산을 선택한 프롬프트에는 motion_only 동작 연결 <Video 1>이 필요합니다."
+            )
+        raise ValueError(
+            "액션 자산 프롬프트의 비디오 번호는 <Video 1>만 사용할 수 있습니다."
+        )
+    participant_a = str(participant_mapping.get("participant_a") or "").strip()
+    participant_b = str(participant_mapping.get("participant_b") or "").strip()
+    if not participant_a:
+        raise ValueError("액션 참가자 A를 실제 캐릭터에 연결하세요.")
+    if participant_count == 2 and not participant_b:
+        raise ValueError("두 명 액션은 참가자 B도 실제 캐릭터에 연결해야 합니다.")
+    if participant_count == 1 and participant_b:
+        raise ValueError("한 명 액션에는 참가자 B 연결을 사용할 수 없습니다.")
+    if participant_a not in prompt or (
+        participant_count == 2 and participant_b not in prompt
+    ):
+        raise ValueError(
+            "프롬프트에 실제 캐릭터와 <Video 1> 참가자 A/B의 긍정형 동작 연결을 명시하세요."
+        )
+
+
 def _next_clip_version(
     root: Path,
     project_id: str | None,
@@ -443,6 +656,7 @@ def enqueue_candidate_set(
     *,
     lineage: dict[str, Any] | None = None,
     reference_provenance: list[dict[str, Any]] | None = None,
+    action_reference_provenance: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     adapter_id = str(data.get("adapter_id") or "").strip()
     requested_queue_lane = str(data.get("queue_lane") or "").strip()
@@ -457,6 +671,14 @@ def enqueue_candidate_set(
             raise ValueError(blocked_reason)
     prompt = str(data.get("prompt") or "").strip()
     references = list(data.get("references") or [])
+    data = {**data, "workflow_settings": _linked_reference_settings(
+        root, references, data.get("workflow_settings")
+    )}
+    action_references = list(data.get("action_references") or [])
+    if data.get("action_reference"):
+        action_references.append(data["action_reference"])
+    if len(action_references) > 1:
+        raise ValueError("한 생성 작업에는 액션 비디오를 한 개만 연결할 수 있습니다.")
     requested_generation_mode = str(data.get("generation_mode") or "").strip().lower()
     if requested_generation_mode not in {"", "r2v", "i2v"}:
         raise ValueError("H3 생성 방식은 R2V 또는 I2V여야 합니다.")
@@ -464,12 +686,39 @@ def enqueue_candidate_set(
         raise ValueError("H3 어댑터와 영상 프롬프트가 필요합니다.")
     if not references:
         raise ValueError("참조 이미지를 한 장 이상 등록하세요.")
+    action_asset = None
+    if action_references:
+        action_row = dict(action_references[0] or {})
+        action_provenance = list(action_reference_provenance or [])
+        if action_provenance:
+            if len(action_provenance) != 1:
+                raise ValueError("액션 비디오 원본 정보는 한 개여야 합니다.")
+            action_asset = dict(action_provenance[0])
+        else:
+            action_asset = action_assets.get_asset(
+                root,
+                str(action_row.get("action_asset_id") or ""),
+                require_usable=True,
+            )
+        mapping = dict(action_row.get("participant_mapping") or {})
+        _validate_action_prompt(
+            prompt,
+            participant_count=int(action_asset.get("participant_count") or 1),
+            participant_mapping=mapping,
+        )
     count = int(data.get("candidate_count") or 3)
     if count < 1 or count > 6:
         raise ValueError("후보 개수는 1~6개여야 합니다.")
     prompt_variants, independent_prompts = _normalize_generation_variants(
         data, prompt, count
     )
+    if action_asset:
+        for variant in prompt_variants:
+            _validate_action_prompt(
+                str(variant.get("video_prompt") or ""),
+                participant_count=int(action_asset.get("participant_count") or 1),
+                participant_mapping=dict(action_references[0].get("participant_mapping") or {}),
+            )
     if independent_prompts:
         count = len(prompt_variants)
         prompt = prompt_variants[0]["video_prompt"]
@@ -487,8 +736,8 @@ def enqueue_candidate_set(
     if (width, height) not in allowed_resolutions:
         if requested_generation_mode == "i2v":
             raise ValueError(
-                "H3 I2V 출력 해상도는 832 × 480, 1280 × 704 또는 "
-                "1376 × 768만 지원합니다."
+                "H3 I2V 출력 해상도는 832 × 480, 1280 × 704, 1376 × 768 또는 "
+                "576 × 1024(9:16 세로)만 지원합니다."
             )
         raise ValueError(
             "H3 R2V 출력 해상도는 608 × 352, 832 × 480, 960 × 544, "
@@ -526,6 +775,7 @@ def enqueue_candidate_set(
         copied.append({
             "picture_index": index,
             "role": str(row.get("role") or f"picture_{index}"),
+            "reference_kind": str(row.get("reference_kind") or "visual_reference"),
             "original_name": str(row.get("original_name") or source.name),
             "source_path": str(target),
             "sha256": _sha256(target),
@@ -541,6 +791,34 @@ def enqueue_candidate_set(
                 else project_picture_index if project_id else None
             ),
         })
+    copied_actions = []
+    if action_asset:
+        source = Path(str(
+            action_asset.get("h3_input_file")
+            or action_asset.get("source_path")
+            or ""
+        ))
+        if not source.is_file():
+            raise FileNotFoundError("선택한 액션 자산의 H3 입력 영상을 찾을 수 없습니다.")
+        if _sha256(source) != str(action_asset.get("sha256") or ""):
+            raise ValueError("선택한 액션 자산 파일의 해시가 변경되었습니다.")
+        target = source_dir / "action_video_01.mp4"
+        shutil.copy2(source, target)
+        action_row = dict(action_references[0] or {})
+        copied_actions.append({
+            "video_index": 1,
+            "media_type": "video",
+            "reference_role": "motion_only",
+            "action_asset_id": str(action_asset.get("action_asset_id") or ""),
+            "title": action_asset.get("title"),
+            "participant_count": action_asset.get("participant_count"),
+            "participant_a": action_asset.get("participant_a"),
+            "participant_b": action_asset.get("participant_b"),
+            "participant_mapping": dict(action_row.get("participant_mapping") or {}),
+            "source_path": str(target),
+            "original_name": source.name,
+            "sha256": _sha256(target),
+        })
     base_seed = int(data.get("seed", -1))
     job_ids = []
     resolved_generation_mode = requested_generation_mode or "r2v"
@@ -555,6 +833,9 @@ def enqueue_candidate_set(
         "seed_mode",
         "source_seed",
         "rerender_seed",
+        "rerender_workflow_policy",
+        "source_workflow_profile_id",
+        "source_workflow_filename",
     }
     lineage_payload = {
         key: value
@@ -564,32 +845,35 @@ def enqueue_candidate_set(
     source_project_id = str(data.get("source_project_id") or "") or None
     source_scene_id = str(data.get("source_scene_id") or "") or None
     source_clip_id = str(data.get("source_clip_id") or "") or None
-    clip_version = data.get("clip_version")
-    if clip_version is None:
-        clip_version = _next_clip_version(
+    legacy_version_metadata: dict[str, int] = {}
+    if independent_prompts and data.get("clip_version") is None:
+        legacy_version_metadata["clip_version"] = _next_clip_version(
             root, source_project_id, source_scene_id, source_clip_id
+        ) or 1
+    elif data.get("clip_version") is not None:
+        legacy_version_metadata["clip_version"] = max(
+            1, int(data["clip_version"])
         )
-    candidate_round = max(1, int(data.get("candidate_round") or 1))
+    if independent_prompts and data.get("candidate_round") is None:
+        legacy_version_metadata["candidate_round"] = 1
+    elif data.get("candidate_round") is not None:
+        legacy_version_metadata["candidate_round"] = max(
+            1, int(data["candidate_round"])
+        )
     queue_lane = (
         "local_generation"
         if lineage_payload.get("render_purpose") == "resolution_rerender"
         else requested_queue_lane or "windows_candidate"
     )
-    comfy_url = (
-        str(os.environ.get("COMFY_URL") or "http://127.0.0.1:8188").rstrip("/")
-        if queue_lane == "local_generation"
-        else _candidate_comfy_url(data)
-    )
-    configured_render = candidate_render_config()
+    # 주소는 실제로 정해진 줄 기준으로 고른다(해상도 재생성은 로컬 8188).
+    comfy_url = _candidate_comfy_url({**data, "queue_lane": queue_lane})
+    hostname = str(urlparse(comfy_url).hostname or "").lower()
     render_target = (
         "local_comfy"
-        if queue_lane == "local_generation"
+        if hostname in LOCAL_HOSTNAMES
         else "windows_comfy"
-        if configured_render["remote_configured"]
-        and comfy_url == configured_render["comfy_url"]
+        if comfy_url == WINDOWS_COMFY_FALLBACK
         else "custom_comfy"
-        if comfy_url != "http://127.0.0.1:8188"
-        else "local_comfy"
     )
     for candidate_index, variant in enumerate(prompt_variants, start=1):
         seed = secrets.randbits(63) if base_seed < 0 else (base_seed + candidate_index - 1) % ((1 << 63) - 1)
@@ -601,6 +885,11 @@ def enqueue_candidate_set(
             "fps": 24, "duration_seconds": duration,
             "filename_prefix": f"video/h3/{set_id}/{job_id}",
         }
+        compile_kwargs = (
+            {"action_reference_count": len(copied_actions)}
+            if copied_actions
+            else {}
+        )
         workflow, patches, profile = _compile_workflow(
             root,
             adapter_id,
@@ -608,6 +897,7 @@ def enqueue_candidate_set(
             len(copied),
             requested_generation_mode or None,
             data.get("workflow_settings"),
+            **compile_kwargs,
         )
         effective_workflow_settings = dict(profile.get("workflow_settings") or {})
         effective_adapter_id = str(profile.get("adapter_id") or adapter_id)
@@ -615,18 +905,27 @@ def enqueue_candidate_set(
             profile.get("generation_mode") or requested_generation_mode or "r2v"
         )
         atomic_write_json(job_dir / "workflow_api.json", workflow)
+        legacy_prompt_variant_metadata = (
+            {
+                "prompt_variant_id": variant["variant_id"],
+                "prompt_variant_label": variant["label"],
+                "prompt_variant_rationale": variant["rationale"],
+            }
+            if independent_prompts
+            else {}
+        )
         request = {
             "schema_version": 2, "job_type": "h3_r2v_generate", "queue_name": "h3_generation",
             "queue_lane": queue_lane,
             "job_id": job_id, "candidate_set_id": set_id, "candidate_index": candidate_index,
             "candidate_count": count, "created_at": created, "adapter_id": adapter_id,
-            "prompt_variant_id": variant["variant_id"],
-            "prompt_variant_label": variant["label"],
-            "prompt_variant_rationale": variant["rationale"],
-            "candidate_round": candidate_round,
-            "clip_version": clip_version,
+            **legacy_prompt_variant_metadata,
+            **legacy_version_metadata,
             **profile, **values, "generation_mode": resolved_generation_mode,
-            "references": copied, "reference_patches": patches,
+            "references": copied,
+            "action_references": copied_actions,
+            "media_references": [*copied, *copied_actions],
+            "reference_patches": patches,
             "source_project_id": source_project_id,
             "source_scene_id": source_scene_id,
             "source_clip_id": source_clip_id,
@@ -647,10 +946,9 @@ def enqueue_candidate_set(
     candidate_set = {
         "schema_version": 2, "candidate_set_id": set_id, "status": "generating",
         "created_at": created, "updated_at": created, "prompt": prompt,
-        "prompt_variants": prompt_variants,
+        "prompt_variants": prompt_variants if independent_prompts else [],
         "independent_prompts": independent_prompts,
-        "candidate_round": candidate_round,
-        "clip_version": clip_version,
+        **legacy_version_metadata,
         "revision_feedback": str(data.get("revision_feedback") or "").strip() or None,
         "parent_candidate_set_id": str(data.get("parent_candidate_set_id") or "").strip() or None,
         "adapter_id": effective_adapter_id, "candidate_count": count, "candidate_job_ids": job_ids,
@@ -662,6 +960,13 @@ def enqueue_candidate_set(
         "queue_lane": queue_lane,
         "workflow_settings": effective_workflow_settings,
         "references": copied,
+        "action_references": copied_actions,
+        "project_kind": (
+            h3_prompt_projects.project_manifest(root, source_project_id).get("project_kind")
+            if source_project_id
+            and (h3_prompt_projects.project_dir(root, source_project_id) / "manifest.json").is_file()
+            else None
+        ),
         "source_project_id": source_project_id,
         "source_scene_id": source_scene_id,
         "source_clip_id": source_clip_id,
@@ -736,38 +1041,48 @@ def enqueue_selected_candidate_rerender(
         if _sha256(source_path) != str(reference.get("sha256") or ""):
             raise ValueError(f"선택 후보의 Picture {index} 파일 해시가 변경되었습니다.")
 
-    stored_workflow = read_json(source_job_dir / "workflow_api.json", {}) or {}
-    source_values = {
-        key: source_request.get(key)
-        for key in (
-            "prompt",
-            "seed",
-            "width",
-            "height",
-            "fps",
-            "duration_seconds",
-            "filename_prefix",
-        )
-    }
-    compiled, reference_patches, profile = _compile_workflow(
+    source_action_references = list(
+        source_request.get("action_references") or []
+    )
+    if len(source_action_references) > 1:
+        raise ValueError("선택 후보에 액션 비디오가 두 개 이상 기록되어 있습니다.")
+    for reference in source_action_references:
+        source_path = Path(str(reference.get("source_path") or ""))
+        if not source_path.is_file():
+            raise FileNotFoundError("선택 후보의 액션 비디오 파일을 찾을 수 없습니다.")
+        if _sha256(source_path) != str(reference.get("sha256") or ""):
+            raise ValueError("선택 후보의 액션 비디오 파일 해시가 변경되었습니다.")
+
+    default_adapter = (
+        _current_action_r2v_adapter(root)
+        if source_action_references
+        else _current_default_r2v_adapter(root)
+    )
+    target_adapter_id = str(default_adapter.get("adapter_id") or "")
+    preflight_kwargs = (
+        {"action_reference_count": len(source_action_references)}
+        if source_action_references
+        else {}
+    )
+    _, _, target_profile = _compile_workflow(
         root,
-        str(source_request.get("adapter_id") or ""),
-        source_values,
+        target_adapter_id,
+        {
+            "prompt": source_request.get("prompt"),
+            "seed": rerender_seed,
+            "width": width,
+            "height": height,
+            "fps": source_request.get("fps") or 24,
+            "duration_seconds": float(source_request.get("duration_seconds") or 5),
+            "filename_prefix": "video/h3/resolution-rerender-preflight",
+        },
         len(source_references),
         "r2v",
-        source_request.get("workflow_settings"),
+        {},
+        **preflight_kwargs,
     )
-    if (
-        compiled != stored_workflow
-        or reference_patches != list(source_request.get("reference_patches") or [])
-        or profile.get("workflow_profile_id")
-        != source_request.get("workflow_profile_id")
-        or profile.get("workflow_filename") != source_request.get("workflow_filename")
-    ):
-        raise ValueError(
-            "선택 후보 생성 이후 워크플로우가 변경되어 해상도만 동일 조건으로 "
-            "재생성할 수 없습니다."
-        )
+    target_adapter_id = str(target_profile.get("adapter_id") or target_adapter_id)
+    target_workflow_settings = dict(target_profile.get("workflow_settings") or {})
 
     with queue_claim_lock(paths["candidate_sets"]):
         current_source_set = read_json(source_set_path, {}) or {}
@@ -788,6 +1103,8 @@ def enqueue_selected_candidate_rerender(
                     != {"width": width, "height": height}
                     or str(existing.get("seed_mode") or "preserved")
                     != "preserved"
+                    or str(existing.get("adapter_id") or "")
+                    != target_adapter_id
                     or _candidate_set_deleted(existing)
                 ):
                     continue
@@ -807,7 +1124,7 @@ def enqueue_selected_candidate_rerender(
         rerender = enqueue_candidate_set(
             root,
             {
-                "adapter_id": source_request.get("adapter_id"),
+                "adapter_id": target_adapter_id,
                 "generation_mode": "r2v",
                 "prompt": source_request.get("prompt"),
                 "references": [
@@ -818,12 +1135,19 @@ def enqueue_selected_candidate_rerender(
                     }
                     for reference in source_references
                 ],
+                "action_references": [
+                    {
+                        "action_asset_id": reference.get("action_asset_id"),
+                        "participant_mapping": reference.get("participant_mapping") or {},
+                    }
+                    for reference in source_action_references
+                ],
                 "candidate_count": 1,
                 "seed": rerender_seed,
                 "width": width,
                 "height": height,
                 "duration_seconds": float(source_request.get("duration_seconds") or 5),
-                "workflow_settings": source_request.get("workflow_settings"),
+                "workflow_settings": target_workflow_settings,
                 "source_project_id": source_request.get("source_project_id"),
                 "source_scene_id": source_request.get("source_scene_id"),
                 "source_clip_id": source_request.get("source_clip_id"),
@@ -841,8 +1165,16 @@ def enqueue_selected_candidate_rerender(
                 "seed_mode": "random" if randomize_seed else "preserved",
                 "source_seed": source_seed,
                 "rerender_seed": rerender_seed,
+                "rerender_workflow_policy": "current_default",
+                "source_workflow_profile_id": source_request.get(
+                    "workflow_profile_id"
+                ),
+                "source_workflow_filename": source_request.get(
+                    "workflow_filename"
+                ),
             },
             reference_provenance=source_references,
+            action_reference_provenance=source_action_references,
         )
     return {**rerender, "already_exists": False}
 
@@ -869,12 +1201,17 @@ def enqueue_selected_candidate_upscale(
     }:
         raise ValueError("현재 선택된 후보의 Spark 결과만 업스케일할 수 있습니다.")
 
-    rerender_job_id = _safe_id(
+    # I2V(시작 이미지) 후보는 이미 목표 비율로 만들어져 Spark 재생성 없이 선택 결과를 바로 올린다.
+    direct = (
+        str(source_set.get("generation_mode") or "").lower() == "i2v"
+        and not data.get("source_rerender_job_id")
+    )
+    rerender_job_id = selected_job_id if direct else _safe_id(
         str(data.get("source_rerender_job_id") or ""), "Spark 재생성 작업 ID"
     )
-    rerender_set: dict[str, Any] | None = None
-    rerender_set_id = ""
-    if paths["candidate_sets"].exists():
+    rerender_set: dict[str, Any] | None = source_set if direct else None
+    rerender_set_id = "" if not direct else set_id
+    if not direct and paths["candidate_sets"].exists():
         for directory in paths["candidate_sets"].iterdir():
             if not directory.is_dir():
                 continue
@@ -898,6 +1235,10 @@ def enqueue_selected_candidate_upscale(
     rerender_request = read_json(rerender_job_dir / "request.json", {}) or {}
     if rerender_status.get("status") != "completed":
         raise ValueError("완료된 Spark 해상도 재생성 결과만 업스케일할 수 있습니다.")
+    source_width = int(rerender_request.get("width") or 0)
+    source_height = int(rerender_request.get("height") or 0)
+    portrait = source_height > source_width
+    target = {"width": 1080, "height": 1920} if portrait else {"width": 1920, "height": 1080}
     source_video = Path(str(rerender_manifest.get("local_video_path") or ""))
     if not source_video.is_file():
         raise FileNotFoundError("Spark 해상도 재생성 영상 파일을 찾을 수 없습니다.")
@@ -915,6 +1256,8 @@ def enqueue_selected_candidate_upscale(
     ):
         raise ValueError("Windows 업스케일 워크플로우 출력은 H264 MP4여야 합니다.")
     workflow_sha256 = _sha256(workflow_path)
+    workflow["2"]["inputs"]["resize_type.width"] = target["width"]
+    workflow["2"]["inputs"]["resize_type.height"] = target["height"]
 
     with queue_claim_lock(paths["jobs"]):
         if paths["jobs"].exists():
@@ -924,9 +1267,10 @@ def enqueue_selected_candidate_upscale(
                 existing = read_json(directory / "request.json", {}) or {}
                 if (
                     existing.get("job_type") != "h3_video_upscale"
-                    or existing.get("source_rerender_job_id") != rerender_job_id
-                    or existing.get("workflow_version")
-                    != WINDOWS_UPSCALE_WORKFLOW_VERSION
+                    or (existing.get("source_rerender_job_id") or existing.get("source_selected_job_id"))
+                    != rerender_job_id
+                    or not str(existing.get("workflow_version") or "").startswith(
+                        WINDOWS_UPSCALE_WORKFLOW_VERSION)
                 ):
                     continue
                 status = read_json(directory / "status.json", {}) or {}
@@ -936,7 +1280,7 @@ def enqueue_selected_candidate_upscale(
                         "status": status.get("status"),
                         "already_exists": True,
                         "source_rerender_job_id": rerender_job_id,
-                        "target_resolution": {"width": 1920, "height": 1080},
+                        "target_resolution": target,
                         "target_fps": 60,
                     }
 
@@ -948,8 +1292,6 @@ def enqueue_selected_candidate_upscale(
             f"video/h3/upscale/{set_id}/{job_id}"
         )
         comfy_url = _candidate_comfy_url(data)
-        source_width = int(rerender_request.get("width") or 0)
-        source_height = int(rerender_request.get("height") or 0)
         request = {
             "schema_version": 1,
             "job_id": job_id,
@@ -961,17 +1303,18 @@ def enqueue_selected_candidate_upscale(
             "comfy_url": comfy_url,
             "created_at": created,
             "case_title": f"{source_set.get('source_clip_id') or selected_job_id} · 1080p60",
+            "upscale_source": "selected_i2v" if direct else "spark_rerender",
             "source_candidate_set_id": set_id,
             "source_selected_job_id": selected_job_id,
-            "source_rerender_set_id": rerender_set_id,
-            "source_rerender_job_id": rerender_job_id,
+            "source_rerender_set_id": None if direct else rerender_set_id,
+            "source_rerender_job_id": None if direct else rerender_job_id,
             "source_video_path": str(source_video),
             "source_output_sha256": source_sha256,
             "source_resolution": {"width": source_width, "height": source_height},
-            "target_resolution": {"width": 1920, "height": 1080},
+            "target_resolution": target,
             "target_fps": 60,
-            "width": 1920,
-            "height": 1080,
+            "width": target["width"],
+            "height": target["height"],
             "fps": 60,
             "output_codec": "h264",
             "workflow_version": WINDOWS_UPSCALE_WORKFLOW_VERSION,
@@ -1009,7 +1352,7 @@ def enqueue_selected_candidate_upscale(
         "status": "queued",
         "already_exists": False,
         "source_rerender_job_id": rerender_job_id,
-        "target_resolution": {"width": 1920, "height": 1080},
+        "target_resolution": target,
         "target_fps": 60,
     }
 
@@ -2133,10 +2476,6 @@ def queue_project_test_set(root: Path, project_test_set_id: str, data: dict[str,
     blocked = [clip for clip in clips if not clip["ready"]]
     if blocked:
         raise ValueError(f"준비되지 않은 H3 클립이 {len(blocked)}개 있습니다.")
-    if str(project.get("generation_mode") or payload.get("generation_mode") or "") == "r2v" and all(
-        len(clip.get("prompt_variants") or []) == 3 for clip in clips
-    ):
-        candidate_count = 3
     payload.update(status="queueing", adapter_id=adapter_id, candidate_count=candidate_count, updated_at=now_iso())
     atomic_write_json(path, payload)
     candidate_set_ids = []
@@ -2147,7 +2486,6 @@ def queue_project_test_set(root: Path, project_test_set_id: str, data: dict[str,
             candidate = enqueue_candidate_set(root, {
                 "adapter_id": adapter_id,
                 "prompt": clip["video_prompt"],
-                "prompt_variants": clip.get("prompt_variants") or None,
                 "duration_seconds": clip["duration_seconds"],
                 "candidate_count": candidate_count,
                 "seed": clip_seed,
@@ -2260,8 +2598,8 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
     if (width, height) not in allowed_resolutions:
         if generation_mode == "i2v":
             raise ValueError(
-                "H3 I2V 출력 해상도는 832 × 480, 1280 × 704 또는 "
-                "1376 × 768만 지원합니다."
+                "H3 I2V 출력 해상도는 832 × 480, 1280 × 704, 1376 × 768 또는 "
+                "576 × 1024(9:16 세로)만 지원합니다."
             )
         raise ValueError(
             "H3 R2V 출력 해상도는 608 × 352, 832 × 480, 960 × 544, "
@@ -2285,69 +2623,20 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
             for clip in blocked[:5]
         )
         raise ValueError(f"준비되지 않은 클립 {len(blocked)}개가 있어 씬 등록을 중단했습니다. {details}")
-    prompt_version_sources = []
-    if generation_mode == "r2v":
-        revision_requests = list_prompt_revision_requests(root)
-        resolved_clips = []
-        for clip in clips:
-            resolved = dict(clip)
-            authored = _latest_authored_scene_prompt(
-                revision_requests,
-                project_id,
-                scene_id,
-                str(clip.get("clip_id") or ""),
-            )
-            if authored:
-                for variant in authored["prompt_variants"]:
-                    report = h3_prompt_contract.validate_prompt(
-                        str(variant.get("video_prompt") or ""),
-                        duration_seconds=float(clip.get("duration_seconds") or 0),
-                    )
-                    if not report.valid:
-                        reasons = "; ".join(
-                            issue.message for issue in report.errors[:5]
-                        )
-                        raise ValueError(
-                            f"{clip.get('clip_id')}의 최신 작성 후보 "
-                            f"{variant.get('variant_id')}가 새 H3 계약을 통과하지 "
-                            f"못했습니다: {reasons}"
-                        )
-                resolved["prompt_variants"] = authored["prompt_variants"]
-                resolved["video_prompt"] = authored["prompt_variants"][0][
-                    "video_prompt"
-                ]
-                prompt_version_sources.append({
-                    "clip_id": clip["clip_id"],
-                    "source": "latest_authored_revision",
-                    **{
-                        key: value
-                        for key, value in authored.items()
-                        if key != "prompt_variants"
-                    },
-                })
-            else:
-                variants = list(clip.get("prompt_variants") or [])
-                prompt_version_sources.append({
-                    "clip_id": clip["clip_id"],
-                    "source": "project_prompt",
-                    "prompt_revision_request_id": None,
-                    "clip_version": 1,
-                    "candidate_round": 1,
-                    "variant_ids": [
-                        str(row.get("variant_id") or "") for row in variants
-                    ],
-                })
-            resolved_clips.append(resolved)
-        clips = resolved_clips
-    if generation_mode == "r2v" and all(
-        len(clip.get("prompt_variants") or []) == 3 for clip in clips
-    ):
-        candidate_count = 3
+    prompt_sources = [
+        {"clip_id": clip["clip_id"], "source": "project_prompt"}
+        for clip in clips
+    ]
     base_seed = int(data.get("seed", -1))
     preflight_errors = []
     for clip_index, clip in enumerate(clips):
         references = list(clip.get("references") or [])
         try:
+            clip_settings = _linked_reference_settings(root, [
+                {"project_id": project_id, "clip_id": clip["clip_id"],
+                 "project_picture_index": row["picture_index"]}
+                for row in references
+            ], data.get("workflow_settings"))
             for reference_index, reference in enumerate(references, start=1):
                 source = h3_prompt_projects.picture_path(
                     root,
@@ -2359,11 +2648,7 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
                     raise FileNotFoundError(
                         f"Picture {reference_index} 파일을 찾을 수 없습니다."
                     )
-            variants = list(clip.get("prompt_variants") or [])
-            prompt = str(
-                (variants[0].get("video_prompt") if variants else None)
-                or clip["video_prompt"]
-            )
+            prompt = str(clip["video_prompt"])
             _compile_workflow(
                 root,
                 adapter_id,
@@ -2378,7 +2663,7 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
                 },
                 len(references),
                 generation_mode,
-                data.get("workflow_settings"),
+                clip_settings,
             )
         except Exception as exc:
             preflight_errors.append(f"{clip.get('clip_id')}: {exc}")
@@ -2400,7 +2685,6 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
                 "queue_lane": queue_lane,
                 "generation_mode": generation_mode,
                 "prompt": clip["video_prompt"],
-                "prompt_variants": clip.get("prompt_variants") or None,
                 "duration_seconds": clip["duration_seconds"],
                 "candidate_count": candidate_count,
                 "seed": clip_seed,
@@ -2436,7 +2720,7 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
         "queue_lane": queue_lane,
         "candidate_set_ids": candidate_set_ids,
         "job_ids": [job_id for row in candidate_sets for job_id in row["candidate_job_ids"]],
-        "prompt_version_sources": prompt_version_sources,
+        "prompt_sources": prompt_sources,
     }
 
 
@@ -2704,9 +2988,399 @@ def force_stop_group(
     }
 
 
-def state(root: Path) -> dict[str, Any]:
-    import candidate_review_queue
+def _prompt_embedding_effects(prompt: Any) -> tuple[bool, list[str]]:
+    text = str(prompt or "")
+    applied = bool(
+        re.search(r"(?<![A-Za-z0-9_])embedding:", text, re.IGNORECASE)
+    )
+    effects: list[str] = []
+    for match in EMBEDDING_EFFECT_PATTERN.finditer(text):
+        effect = match.group(1).rstrip(")]}>\"'.,:")
+        if effect and effect not in effects:
+            effects.append(effect)
+    return applied, effects
 
+
+def _job_record(paths: dict[str, Path], job_id: str, *, compact: bool = False) -> dict[str, Any]:
+    directory = paths["jobs"] / job_id
+    request = read_json(directory / "request.json", {}) or {}
+    if request.get("seed") is not None:
+        request = {**request, "seed_text": str(request["seed"])}
+    manifest = read_json(directory / "manifest.json", {}) or {}
+    if compact:
+        embedding_effect_applied, embedding_effects = _prompt_embedding_effects(
+            request.get("prompt")
+        )
+        request = {
+            key: value
+            for key, value in request.items()
+            if key not in {
+                "prompt", "prompts", "prompt_variants", "references",
+                "resolved_references", "uploaded_references", "uploads",
+            }
+        }
+        request["embedding_effect_applied"] = embedding_effect_applied
+        request["embedding_effects"] = embedding_effects
+        manifest = {
+            key: manifest[key]
+            for key in ("generation_seconds",)
+            if key in manifest
+        }
+    return {
+        "job_id": job_id,
+        "request": request,
+        "status": read_json(directory / "status.json", {}) or {},
+        "manifest": manifest,
+    }
+
+
+def _compact_candidate_set(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in {"prompt", "prompt_variants", "references"}
+    }
+
+
+def _candidate_source(
+    paths: dict[str, Path], payload: dict[str, Any]
+) -> tuple[str, str]:
+    project = str(payload.get("source_project_id") or "").strip()
+    scene = str(payload.get("source_scene_id") or "").strip()
+    if not project or not scene:
+        first_job_id = str((payload.get("candidate_job_ids") or [""])[0] or "")
+        request = read_json(paths["jobs"] / first_job_id / "request.json", {}) or {}
+        project = project or str(request.get("source_project_id") or "").strip()
+        scene = scene or str(request.get("source_scene_id") or "").strip()
+    return project or "__direct__", scene or "__none__"
+
+
+def _candidate_filters(
+    paths: dict[str, Path], payloads: list[dict[str, Any]]
+) -> dict[str, Any]:
+    rows = [
+        {"project_id": project, "scene_id": scene}
+        for project, scene in (_candidate_source(paths, payload) for payload in payloads)
+    ]
+    projects = sorted({row["project_id"] for row in rows})
+    scenes_by_project = {
+        project: sorted({
+            row["scene_id"] for row in rows if row["project_id"] == project
+        })
+        for project in projects
+    }
+    return {"projects": projects, "scenes_by_project": scenes_by_project}
+
+
+def _page_values(data: dict[str, Any], total: int) -> tuple[int, int, int, int]:
+    page_size = max(1, min(50, int(data.get("page_size") or 10)))
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    page = max(1, min(total_pages, int(data.get("page") or 1)))
+    return page, page_size, total_pages, (page - 1) * page_size
+
+
+def _filter_candidate_sets(
+    paths: dict[str, Path], payloads: list[dict[str, Any]], data: dict[str, Any]
+) -> list[dict[str, Any]]:
+    project = str(data.get("project_id") or "").strip()
+    scene = str(data.get("scene_id") or "").strip()
+    return [
+        payload
+        for payload in payloads
+        if (
+            (not project or _candidate_source(paths, payload)[0] == project)
+            and (not scene or _candidate_source(paths, payload)[1] == scene)
+        )
+    ]
+
+
+def candidate_page(root: Path, data: dict[str, Any]) -> dict[str, Any]:
+    """Return one filtered 04-candidate page and only its detailed jobs."""
+    paths = roots(root)
+    source_sets = [
+        payload for payload in reconcile(root)
+        if payload.get("render_purpose") != "resolution_rerender"
+        and not payload.get("hidden_from_candidate_page")
+    ]
+    filtered = _filter_candidate_sets(paths, source_sets, data)
+    page, page_size, total_pages, start = _page_values(data, len(filtered))
+    page_sets = filtered[start:start + page_size]
+    job_ids = {
+        str(job_id)
+        for payload in page_sets
+        for job_id in payload.get("candidate_job_ids") or []
+    }
+    return {
+        "candidate_sets": page_sets,
+        "jobs": [
+            _job_record(paths, job_id, compact=True)
+            for job_id in sorted(job_ids, reverse=True)
+            if (paths["jobs"] / job_id).is_dir()
+        ],
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": len(filtered),
+            "total_pages": total_pages,
+            "start": start + 1 if filtered else 0,
+            "end": min(start + page_size, len(filtered)),
+        },
+        "filters": _candidate_filters(paths, source_sets),
+    }
+
+
+def _rerender_performance_samples(paths: dict[str, Path]) -> list[dict[str, Any]]:
+    samples: list[dict[str, Any]] = []
+    if not paths["jobs"].exists():
+        return samples
+    for directory in paths["jobs"].iterdir():
+        if not directory.is_dir():
+            continue
+        request = read_json(directory / "request.json", {}) or {}
+        if request.get("render_purpose") != "resolution_rerender":
+            continue
+        status = read_json(directory / "status.json", {}) or {}
+        state = str(status.get("status") or "missing")
+        if state not in {"completed", "failed"}:
+            continue
+        manifest = read_json(directory / "manifest.json", {}) or {}
+        elapsed = manifest.get("generation_seconds") or status.get("elapsed_seconds")
+        try:
+            elapsed_value = float(elapsed) if elapsed is not None else None
+        except (TypeError, ValueError):
+            elapsed_value = None
+        samples.append({
+            "job_id": directory.name,
+            "status": state,
+            "width": int(request.get("width") or 0),
+            "height": int(request.get("height") or 0),
+            "duration_seconds": float(request.get("duration_seconds") or 0),
+            "reference_count": len(request.get("references") or []),
+            "elapsed_seconds": elapsed_value,
+            "source_clip_id": str(request.get("source_clip_id") or ""),
+            "error_kind": str(status.get("error") or "").split(":", 1)[0],
+        })
+    return samples
+
+
+def _sample_percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        return 0.0
+    index = max(0, min(len(ordered) - 1, round((len(ordered) - 1) * fraction)))
+    return ordered[index]
+
+
+def _rerender_estimate(
+    samples: list[dict[str, Any]],
+    *,
+    width: int,
+    height: int,
+    duration_seconds: float,
+    reference_count: int,
+) -> dict[str, Any]:
+    same_resolution = [
+        row for row in samples
+        if (row["width"], row["height"]) == (width, height)
+    ]
+    exact = [
+        row for row in same_resolution
+        if abs(row["duration_seconds"] - duration_seconds) < 0.01
+        and row["reference_count"] == reference_count
+    ]
+    exact_successes = [
+        row for row in exact
+        if row["status"] == "completed" and row["elapsed_seconds"] is not None
+    ]
+    exact_failures = [row for row in exact if row["status"] == "failed"]
+    completed = [
+        row for row in same_resolution
+        if row["status"] == "completed" and row["elapsed_seconds"] is not None
+        and row["duration_seconds"] > 0
+    ]
+    if exact_successes:
+        basis = exact_successes
+        method = "exact"
+        values = [float(row["elapsed_seconds"]) for row in basis]
+    else:
+        basis = sorted(
+            completed,
+            key=lambda row: (
+                abs(row["duration_seconds"] - duration_seconds) * 2
+                + abs(row["reference_count"] - reference_count) * 1.5,
+                abs(row["duration_seconds"] - duration_seconds),
+            ),
+        )[:8]
+        method = "nearby"
+        values = []
+        for row in basis:
+            duration_scale = duration_seconds / max(0.5, row["duration_seconds"])
+            reference_scale = max(
+                0.8,
+                min(1.3, 1 + 0.04 * (reference_count - row["reference_count"])),
+            )
+            values.append(float(row["elapsed_seconds"]) * duration_scale * reference_scale)
+    examples = []
+    for row in sorted(basis, key=lambda item: float(item["elapsed_seconds"])):
+        clip = row["source_clip_id"] or row["job_id"]
+        if any(item["clip_id"] == clip for item in examples):
+            continue
+        examples.append({
+            "clip_id": clip,
+            "duration_seconds": row["duration_seconds"],
+            "reference_count": row["reference_count"],
+            "elapsed_seconds": round(float(row["elapsed_seconds"]), 1),
+        })
+        if len(examples) >= 3:
+            break
+    max_successful_references = max(
+        (row["reference_count"] for row in completed),
+        default=0,
+    )
+    return {
+        "method": method if values else "insufficient",
+        "sample_count": len(values),
+        "exact_success_count": len(exact_successes),
+        "exact_failure_count": len(exact_failures),
+        "median_seconds": round(_sample_percentile(values, 0.5), 1),
+        "low_seconds": round(_sample_percentile(values, 0.1), 1),
+        "high_seconds": round(_sample_percentile(values, 0.9), 1),
+        "max_successful_reference_count": max_successful_references,
+        "examples": examples,
+        "failure_kinds": sorted({row["error_kind"] for row in exact_failures if row["error_kind"]}),
+    }
+
+
+def results_page(root: Path, data: dict[str, Any]) -> dict[str, Any]:
+    """Return one filtered 05-results page plus its rerender/upscale lineage."""
+    paths = roots(root)
+    all_sets = reconcile(root)
+    source_sets = [
+        payload for payload in all_sets
+        if payload.get("render_purpose") != "resolution_rerender"
+        and _candidate_selected_jobs(payload)
+    ]
+    filtered = _filter_candidate_sets(paths, source_sets, data)
+    selections = sorted(
+        (
+            (payload, selection)
+            for payload in filtered
+            for selection in _candidate_selected_jobs(payload)
+        ),
+        key=lambda row: str(
+            row[1].get("selected_at") or row[0].get("updated_at") or ""
+        ),
+        reverse=True,
+    )
+    page, page_size, total_pages, start = _page_values(data, len(selections))
+    page_selections = selections[start:start + page_size]
+    selected_job_ids = {str(selection["job_id"]) for _, selection in page_selections}
+    page_sets: list[dict[str, Any]] = []
+    performance_samples = _rerender_performance_samples(paths)
+    for payload, selection in page_selections:
+        clone = copy.deepcopy(payload)
+        clone["selected_jobs"] = [selection]
+        clone["selected_job_id"] = selection["job_id"]
+        source_request = read_json(
+            paths["jobs"] / str(selection["job_id"]) / "request.json", {}
+        ) or {}
+        source_width = int(source_request.get("width") or 0)
+        source_height = int(source_request.get("height") or 0)
+        duration_seconds = float(source_request.get("duration_seconds") or 0)
+        reference_count = len(
+            payload.get("references") or source_request.get("references") or []
+        )
+        clone["rerender_estimates"] = {
+            f"{width}x{height}": _rerender_estimate(
+                performance_samples,
+                width=width,
+                height=height,
+                duration_seconds=duration_seconds,
+                reference_count=reference_count,
+            )
+            for width, height in sorted(R2V_RERENDER_RESOLUTIONS)
+            if width * height > source_width * source_height
+        }
+        page_sets.append(clone)
+    rerenders = [
+        payload for payload in all_sets
+        if payload.get("render_purpose") == "resolution_rerender"
+        and str(payload.get("source_selected_job_id") or "") in selected_job_ids
+        and any(
+            str(
+                (
+                    read_json(paths["jobs"] / str(job_id) / "status.json", {})
+                    or {}
+                ).get("status")
+                or "missing"
+            ) not in {"failed", "cancelled"}
+            for job_id in payload.get("candidate_job_ids") or []
+        )
+    ]
+    job_ids = set(selected_job_ids)
+    for payload in rerenders:
+        job_ids.update(str(value) for value in payload.get("candidate_job_ids") or [])
+    if paths["jobs"].exists():
+        for directory in paths["jobs"].iterdir():
+            if not directory.is_dir():
+                continue
+            request = read_json(directory / "request.json", {}) or {}
+            if (
+                request.get("job_type") == "h3_video_upscale"
+                and str(request.get("source_rerender_job_id") or "") in job_ids
+            ):
+                job_ids.add(directory.name)
+    return {
+        "candidate_sets": page_sets + [
+            _compact_candidate_set(payload) for payload in rerenders
+        ],
+        "jobs": [
+            _job_record(paths, job_id, compact=job_id not in selected_job_ids)
+            for job_id in sorted(job_ids, reverse=True)
+            if (paths["jobs"] / job_id).is_dir()
+        ],
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": len(selections),
+            "total_sets": len(filtered),
+            "total_pages": total_pages,
+            "start": start + 1 if selections else 0,
+            "end": min(start + page_size, len(selections)),
+        },
+        "filters": _candidate_filters(paths, source_sets),
+    }
+
+
+def clip_versions(root: Path, data: dict[str, Any]) -> dict[str, Any]:
+    """Return detailed candidate history only for the selected 01 clip."""
+    paths = roots(root)
+    project = str(data.get("project_id") or "").strip()
+    scene = str(data.get("scene_id") or "").strip()
+    clip = str(data.get("clip_id") or "").strip()
+    payloads = [
+        payload for payload in reconcile(root)
+        if payload.get("render_purpose") != "resolution_rerender"
+        and str(payload.get("source_project_id") or "") == project
+        and str(payload.get("source_scene_id") or "") == scene
+        and str(payload.get("source_clip_id") or "") == clip
+    ]
+    job_ids = {
+        str(selection["job_id"])
+        for payload in payloads
+        for selection in _candidate_selected_jobs(payload)
+    }
+    return {
+        "candidate_sets": payloads,
+        "jobs": [
+            _job_record(paths, job_id)
+            for job_id in sorted(job_ids, reverse=True)
+            if (paths["jobs"] / job_id).is_dir()
+        ],
+    }
+
+
+def state(root: Path, *, compact: bool = False) -> dict[str, Any]:
     paths = roots(root)
     candidate_sets = reconcile(root)
     deleted_candidate_set_ids: set[str] = set()
@@ -2732,17 +3406,13 @@ def state(root: Path) -> dict[str, Any]:
                 and request.get("candidate_set_id") in deleted_candidate_set_ids
             ):
                 continue
-            if request.get("seed") is not None:
-                request = {**request, "seed_text": str(request["seed"])}
-            jobs.append({
-                "job_id": directory.name,
-                "request": request,
-                "status": read_json(directory / "status.json", {}) or {},
-                "manifest": read_json(directory / "manifest.json", {}) or {},
-            })
+            jobs.append(_job_record(paths, directory.name, compact=compact))
     return {
         "jobs": jobs,
-        "candidate_sets": candidate_sets,
+        "candidate_sets": (
+            [_compact_candidate_set(payload) for payload in candidate_sets]
+            if compact else candidate_sets
+        ),
         "prompt_revision_requests": list_prompt_revision_requests(root),
         "project_test_sets": list_project_test_sets(root),
         "test_queues": reconcile_test_queues(root),
@@ -2755,7 +3425,6 @@ def state(root: Path) -> dict[str, Any]:
         },
         "prompt_authoring": prompt_revision_authoring_config(),
         "candidate_render": candidate_render_config(),
-        "candidate_ai_review": candidate_review_queue.state(root),
     }
 
 
@@ -2882,6 +3551,14 @@ def delete_candidate_set(root: Path, candidate_set_id: str) -> dict[str, Any]:
                 f"없습니다. 먼저 후보군을 강제종료하세요: {details}"
             )
 
+        selected_jobs = _candidate_selected_jobs(payload)
+        if selected_jobs and not already_deleted:
+            selected_ids = ", ".join(row["job_id"] for row in selected_jobs)
+            raise RuntimeError(
+                "선택된 후보가 있어 후보군을 삭제할 수 없습니다. "
+                f"먼저 후보 선택을 취소하세요: {selected_ids}"
+            )
+
         if not already_deleted:
             stamp = now_iso()
             payload.update(
@@ -2892,15 +3569,6 @@ def delete_candidate_set(root: Path, candidate_set_id: str) -> dict[str, Any]:
                 updated_at=stamp,
             )
             atomic_write_json(path, payload)
-
-    # The candidate-set deletion flag is committed before taking the review
-    # queue lock. This prevents new automatic reviews from being registered,
-    # while avoiding nested locks shared with the review worker.
-    import candidate_review_queue
-
-    review_cleanup = candidate_review_queue.retire_candidate_set_reviews(
-        root, set_id,
-    )
 
     return {
         "candidate_set_id": set_id,
@@ -2914,8 +3582,6 @@ def delete_candidate_set(root: Path, candidate_set_id: str) -> dict[str, Any]:
         "jobs_preserved": True,
         "outputs_preserved": True,
         "sources_preserved": True,
-        "completed_reviews_preserved": True,
-        "review_cleanup": review_cleanup,
     }
 
 
@@ -2930,3 +3596,43 @@ def video_path(root: Path, job_id: str) -> Path:
     if not path.is_file():
         raise FileNotFoundError("H3 영상 출력이 없습니다.")
     return path
+
+
+def candidate_reference_path(
+    root: Path, candidate_set_id: str, picture_index: int
+) -> Path:
+    """Return an immutable candidate-set reference copied at generation time."""
+    set_id = _safe_id(candidate_set_id, "후보 세트 ID")
+    try:
+        index = int(picture_index)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Picture 번호가 올바르지 않습니다.") from exc
+    if index < 1:
+        raise ValueError("Picture 번호가 올바르지 않습니다.")
+
+    set_dir = roots(root)["candidate_sets"] / set_id
+    payload = read_json(set_dir / "candidate_set.json", {}) or {}
+    if not payload:
+        raise FileNotFoundError("H3 후보군을 찾을 수 없습니다.")
+    reference = next(
+        (
+            row
+            for row in payload.get("references") or []
+            if int(row.get("picture_index") or 0) == index
+        ),
+        None,
+    )
+    if not reference:
+        raise FileNotFoundError(f"Picture {index} 참조 이미지를 찾을 수 없습니다.")
+
+    source_root = roots(root)["candidate_sets"].resolve()
+    source_path = Path(str(reference.get("source_path") or "")).resolve()
+    try:
+        source_path.relative_to(source_root)
+    except ValueError as exc:
+        raise FileNotFoundError("후보군 보관본 바깥의 참조 이미지는 열 수 없습니다.") from exc
+    if source_path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise FileNotFoundError("지원하는 Picture 이미지 형식이 아닙니다.")
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Picture {index} 후보군 보관본이 없습니다.")
+    return source_path

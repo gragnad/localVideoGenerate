@@ -12,7 +12,6 @@ import model_test_r2v
 import model_test_registry
 import benchmark_jobs
 import h3_queue
-import model_test_review_queue
 import workflow_adapter
 from job_queue import atomic_write_json, read_json
 
@@ -54,7 +53,7 @@ class ModelTestR2VTest(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def test_active_review_cancel_stays_pending_until_worker_confirms_stop(self):
+    def test_legacy_ai_review_state_does_not_block_session_delete(self):
         session = model_test_registry.create_session(self.root, {
             "model_id": self.model_id,
             "workflow_profile_id": self.profile["workflow_profile_id"],
@@ -64,38 +63,21 @@ class ModelTestR2VTest(unittest.TestCase):
             "resolution": {"width": 832, "height": 480},
         })
         queue_dir = (
-            self.root / "runtime/model_test_review_queue/review_active_cancel"
+            self.root / "runtime/model_test_review_queue/review_legacy"
         )
         atomic_write_json(queue_dir / "request.json", {
             "session_id": session["session_id"],
             "generation_job_ids": ["generation_job"],
         })
-        atomic_write_json(queue_dir / "status.json", {
-            "status": "reviewing",
-        })
-
-        result = model_test_review_queue.cancel(self.root, session["session_id"])
-
-        self.assertTrue(result["cancel_requested"])
-        self.assertEqual(
-            "cancel_requested",
-            read_json(queue_dir / "status.json", {})["status"],
-        )
-        with model_test_registry.open_registry(self.root) as connection:
-            status = connection.execute(
-                "SELECT status FROM test_sessions WHERE session_id=?",
-                (session["session_id"],),
-            ).fetchone()["status"]
-        self.assertEqual("review_cancel_requested", status)
-        with self.assertRaisesRegex(RuntimeError, "실행 중이거나 큐 대기 중"):
-            model_test_registry.delete_session(self.root, session["session_id"])
-
-        atomic_write_json(queue_dir / "status.json", {"status": "cancelled"})
+        atomic_write_json(queue_dir / "status.json", {"status": "reviewing"})
         benchmark_jobs.set_session_review_status(
-            self.root, [session["session_id"]], "review_cancelled"
+            self.root, [session["session_id"]], "ai_reviewing"
         )
+
         deleted = model_test_registry.delete_session(self.root, session["session_id"])
+
         self.assertEqual(1, deleted["deleted_review_queue_count"])
+        self.assertFalse(queue_dir.exists())
 
     def _write_project(
         self,
@@ -466,7 +448,7 @@ class ModelTestR2VTest(unittest.TestCase):
                 "workflow_settings": {"sol_attn": sol_attn_settings},
             })
 
-    def test_update_attention_workflow_is_registered_as_default_r2v_adapter(self):
+    def test_update_attention_workflow_remains_registered_as_r2v_adapter(self):
         payload = json.loads(self.workflow.read_text(encoding="utf-8"))
         payload["127"] = {
             "class_type": "UNETLoader",
@@ -518,7 +500,7 @@ class ModelTestR2VTest(unittest.TestCase):
         production = next(
             row for row in available if row["adapter_id"] == adapter["adapter_id"]
         )
-        self.assertTrue(production["default_for_generation"])
+        self.assertFalse(production["default_for_generation"])
         compiled, patches, metadata = h3_queue._compile_workflow(
             self.root,
             adapter["adapter_id"],
@@ -572,6 +554,112 @@ class ModelTestR2VTest(unittest.TestCase):
                 },
                 10,
                 "r2v",
+            )
+
+    def test_int8_alibaba_turbo_workflow_is_default_and_compiles_nine_pictures(self):
+        payload = json.loads(self.workflow.read_text(encoding="utf-8"))
+        payload.update({
+            "123": {
+                "class_type": "KSamplerSelect",
+                "inputs": {"sampler_name": "euler"},
+            },
+            "125": {
+                "class_type": "SamplerCustomAdvanced",
+                "inputs": {
+                    "guider": ["126", 0],
+                    "sigmas": ["161", 1],
+                    "latent_image": ["136", 1],
+                },
+            },
+            "126": {
+                "class_type": "BasicGuider",
+                "inputs": {"model": ["161", 0], "conditioning": ["136", 0]},
+            },
+            "127": {
+                "class_type": "UNETLoader",
+                "inputs": {
+                    "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+                    "weight_dtype": "default",
+                },
+            },
+            "161": {
+                "class_type": "MiniMaxH3PDDAccApply",
+                "inputs": {
+                    "pdd_file": "MiniMax-H3-Ref2VA-Acc-8Step.safetensors",
+                    "nfe": "8",
+                    "lora_strength": 1,
+                    "head_strength": 1,
+                    "on_off_grid": "error",
+                    "enabled": True,
+                    "partition_check": "error",
+                    "model": ["166", 0],
+                },
+            },
+            "166": {
+                "class_type": "MiniMaxH3SigmaShift",
+                "inputs": {"shift_video": 12, "shift_audio": 3, "model": ["127", 0]},
+            },
+        })
+        turbo_path = (
+            self.workflows / model_test_r2v.R2V_INT8_TURBO_WORKFLOW_FILENAME
+        )
+        turbo_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        dashboard = model_test_registry.dashboard(self.root, self.workflows)
+        profile = next(
+            row for row in dashboard["workflows"]
+            if row["workflow_filename"] == turbo_path.name
+        )
+        adapter = next(
+            row for row in dashboard["adapters"]
+            if row["workflow_profile_id"] == profile["workflow_profile_id"]
+        )
+        self.assertEqual("MiniMax H3 R2V INT8 + Alibaba Turbo", profile["name"])
+        self.assertEqual(9, adapter["config"]["multi_reference"]["max_slots"])
+        self.assertEqual(
+            ["137", "139"],
+            adapter["config"]["multi_reference"]["loader_node_ids"],
+        )
+        production = next(
+            row for row in h3_queue.available_adapters(self.root)["adapters"]
+            if row["adapter_id"] == adapter["adapter_id"]
+        )
+        self.assertTrue(production["default_for_generation"])
+
+        compiled, patches, metadata = h3_queue._compile_workflow(
+            self.root,
+            adapter["adapter_id"],
+            {
+                "prompt": "The hero runs through the scene.",
+                "seed": 17,
+                "width": 1280,
+                "height": 736,
+                "duration_seconds": 5.5,
+                "filename_prefix": "video/int8-turbo",
+            },
+            9,
+            "r2v",
+        )
+        self.assertEqual(turbo_path.name, metadata["workflow_filename"])
+        self.assertEqual(
+            [{"node_id": node_id, "input": "image"} for node_id in ["137", "139"]]
+            + [
+                {"node_id": f"h3_ref_{slot}", "input": "image"}
+                for slot in range(3, 10)
+            ],
+            patches,
+        )
+        self.assertEqual("The hero runs through the scene.", compiled["138"]["inputs"]["value"])
+        self.assertEqual("euler", compiled["123"]["inputs"]["sampler_name"])
+        self.assertEqual(["161", 1], compiled["125"]["inputs"]["sigmas"])
+        self.assertEqual("MiniMax-H3-Ref2VA-Acc-8Step.safetensors", compiled["161"]["inputs"]["pdd_file"])
+        self.assertEqual("8", compiled["161"]["inputs"]["nfe"])
+        self.assertEqual("error", compiled["161"]["inputs"]["on_off_grid"])
+        for slot in range(1, 10):
+            loader_id = ("137", "139")[slot - 1] if slot <= 2 else f"h3_ref_{slot}"
+            self.assertEqual(
+                [loader_id, 0],
+                compiled["136"]["inputs"][f"ref_images.ref_image_{slot - 1}"],
             )
 
     def test_sol_attn_settings_reject_invalid_or_unsafe_values(self):
@@ -670,43 +758,8 @@ class ModelTestR2VTest(unittest.TestCase):
         h3_state = h3_queue.state(self.root)
         self.assertEqual(queued["queue_id"], h3_state["test_queues"][0]["test_queue_id"])
         self.assertEqual("queued", h3_state["test_queues"][0]["status"])
-        review_queue = model_test_review_queue.enqueue(
-            self.root, session["session_id"]
-        )
-        self.assertEqual([job_id], review_queue["generation_job_ids"])
-        self.assertEqual(1, review_queue["queued_count"])
-        self.assertEqual(
-            "session_completed_at_execution",
-            review_queue["target_scope"],
-        )
-        self.assertEqual(
-            "H3·ComfyUI 생성 큐 완료 후 AI 검수 대기",
-            read_json(
-                self.root
-                / "runtime/model_test_review_queue"
-                / review_queue["queue_id"]
-                / "status.json",
-                {},
-            )["stage"],
-        )
         benchmark_jobs.record_result(
             self.root, request, status="completed", output_path=str(self.root / "runtime/h3/outputs/test.mp4")
-        )
-        first_queue_dir = (
-            self.root / "runtime/model_test_review_queue" / review_queue["queue_id"]
-        )
-        atomic_write_json(first_queue_dir / "summary.json", {
-            "errors": [{"job_id": job_id, "error": "finish_reason=length"}],
-        })
-        atomic_write_json(first_queue_dir / "status.json", {
-            "status": "completed_with_failures",
-        })
-        retry = model_test_review_queue.enqueue(self.root, session["session_id"])
-        self.assertEqual("latest_failed_reviews", retry["target_scope"])
-        self.assertEqual([job_id], retry["generation_job_ids"])
-        self.assertEqual(
-            [job_id],
-            model_test_review_queue.resolved_generation_job_ids(self.root, retry),
         )
 
     def test_created_project_test_set_is_exposed_as_its_own_r2v_suite(self):

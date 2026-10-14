@@ -10,10 +10,9 @@ source_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 target_dir="$HOME/local-ai/review-qwen38"
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/h3-video-engine"
 service_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-worker_dropin_dir="$service_dir/model-test-review-worker.service.d"
 bin_dir="$HOME/bin"
 
-mkdir -p "$target_dir" "$config_dir" "$service_dir" "$worker_dropin_dir" "$bin_dir"
+mkdir -p "$target_dir" "$config_dir" "$service_dir" "$bin_dir"
 install -m 0755 "$source_dir/create-container.sh" "$target_dir/create-container.sh"
 install -m 0755 "$source_dir/start.sh" "$target_dir/start.sh"
 install -m 0755 "$source_dir/stop.sh" "$target_dir/stop.sh"
@@ -22,8 +21,6 @@ if [[ ! -f "$config_dir/qwen38-review.env" ]]; then
   install -m 0600 "$source_dir/qwen38-review.env.example" "$config_dir/qwen38-review.env"
 fi
 install -m 0644 "$source_dir/qwen38-review.service" "$service_dir/qwen38-review.service"
-install -m 0600 "$source_dir/qwen38-review-worker.env" "$config_dir/qwen38-review-worker.env"
-install -m 0644 "$source_dir/20-qwen38-review.conf" "$worker_dropin_dir/20-qwen38-review.conf"
 install -m 0755 "$source_dir/ai-start-vllm" "$bin_dir/ai-start-vllm"
 install -m 0755 "$source_dir/ai-stop-vllm" "$bin_dir/ai-stop-vllm"
 systemctl --user daemon-reload

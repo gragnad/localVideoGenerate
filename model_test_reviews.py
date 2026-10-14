@@ -10,7 +10,6 @@ from typing import Any
 import review_contract
 import h3_queue
 from job_queue import now_iso, read_json
-import model_test_review_queue
 import model_test_registry
 import model_test_r2v
 
@@ -264,33 +263,6 @@ def save_review(root: Path, run_id: str, data: dict[str, Any]) -> dict[str, Any]
     )
 
 
-def save_ai_review(
-    root: Path,
-    run_id: str,
-    data: dict[str, Any],
-    *,
-    source_path: str,
-) -> dict[str, Any]:
-    return _save_review(
-        root, run_id, data,
-        reviewer_kind="ai_benchmark",
-        source_path=source_path,
-    )
-
-
-def save_r2v_ai_review(
-    root: Path,
-    run_id: str,
-    data: dict[str, Any],
-    *,
-    source_path: str,
-) -> dict[str, Any]:
-    return _save_review(
-        root, run_id, data,
-        reviewer_kind="ai_benchmark_r2v",
-        source_path=source_path,
-    )
-
 def run_review(root: Path, run_id: str) -> dict[str, Any]:
     with model_test_registry.open_registry(root) as connection:
         context = dict(_run_context(connection, run_id))
@@ -306,53 +278,7 @@ def run_review(root: Path, run_id: str) -> dict[str, Any]:
 
 
 def session_results(root: Path, session_id: str) -> dict[str, Any]:
-    queue_entry = next(
-        (
-            entry
-            for entry in model_test_review_queue.list_queue(root)
-            if str((entry.get("request") or {}).get("session_id") or "") == session_id
-        ),
-        None,
-    )
-    queue_request = dict((queue_entry or {}).get("request") or {})
-    queue_status_data = dict((queue_entry or {}).get("status") or {})
-    queue_id = str(
-        queue_request.get("queue_id")
-        or queue_status_data.get("queue_id")
-        or ""
-    )
-    queue_summary = read_json(
-        model_test_review_queue.queue_root(root) / queue_id / "summary.json", {}
-    ) if queue_id else {}
-    review_job_ids = [
-        str(value) for value in queue_request.get("generation_job_ids") or []
-    ]
-    review_order = {job_id: index for index, job_id in enumerate(review_job_ids)}
-    queue_state = str(queue_status_data.get("status") or "")
-    queue_errors = {
-        str(item.get("job_id") or ""): str(item.get("error") or "")
-        for item in (queue_summary.get("errors") or [])
-        if isinstance(item, dict)
-    }
-    report_jobs = {
-        str(item.get("job_id") or "")
-        for item in (queue_summary.get("reports") or [])
-        if isinstance(item, dict)
-    }
-    if queue_id:
-        report_jobs.update(
-            path.stem
-            for path in (
-                model_test_review_queue.queue_root(root) / queue_id / "reports"
-            ).glob("*.json")
-        )
-    current_review_job = str(
-        queue_status_data.get("current_generation_job_id") or ""
-    )
-    active_queue_states = {
-        "queued", "claimed", "preparing", "reviewing", "cancel_requested",
-    }
-
+    """Human reviews are editable; archived AI reviews are returned read-only."""
     with model_test_registry.open_registry(root) as connection:
         session = connection.execute(
             """SELECT s.*,m.display_name model_name,w.name workflow_name,w.profile_kind,
@@ -425,72 +351,12 @@ def session_results(root: Path, session_id: str) -> dict[str, Any]:
                 ai_review["enforcement"] = dict(report.get("enforcement") or {})
                 ai_review["rubric_version"] = report.get("rubric_version")
                 ai_review["review_model"] = report.get("model")
-            status_payload = read_json(job_dir / "status.json", {}) if job_dir else {}
-            status_payload = status_payload or {}
-            explicit_status = str(status_payload.get("ai_review_status") or "")
-            explicit_queue_id = str(status_payload.get("ai_review_queue_id") or "")
-            if job_id in queue_errors:
-                ai_status = "failed"
-            elif job_id in report_jobs:
-                ai_status = "completed"
-            elif job_id == current_review_job:
-                ai_status = "reviewing"
-            elif job_id in review_order and queue_state in active_queue_states:
-                ai_status = (
-                    "preparing"
-                    if queue_state in {"claimed", "preparing"}
-                    else "queued"
-                )
-            elif job_id in review_order and queue_state in {
-                "failed", "completed_with_failures",
-            }:
-                ai_status = "failed"
-            elif job_id in review_order and queue_state in {"cancelled", "cancel_requested"}:
-                ai_status = "cancelled"
-            elif explicit_status and (
-                not queue_id or explicit_queue_id == queue_id
-            ):
-                ai_status = explicit_status
-            elif ai_review:
-                ai_status = "completed"
-            else:
-                ai_status = "not_started"
-            item["ai_review_status"] = ai_status
-            item["ai_review_error"] = queue_errors.get(job_id) or str(
-                status_payload.get("ai_review_error") or ""
-            )
-            item["ai_review_order"] = review_order.get(job_id)
             item["human_review"] = human_review
             item["ai_review"] = ai_review
             item["review"] = human_review or ai_review
             runs.append(item)
-        ai_status_counts: dict[str, int] = {}
-        for item in runs:
-            key = str(item.get("ai_review_status") or "not_started")
-            ai_status_counts[key] = ai_status_counts.get(key, 0) + 1
-        review_total = len(review_job_ids) or sum(
-            str(item.get("ai_review_status") or "not_started") != "not_started"
-            for item in runs
-        )
         return {
             "session": session_data,
-            "review_queue": {
-                "queue_id": queue_id or None,
-                "status": queue_state or None,
-                "stage": queue_status_data.get("stage"),
-                "message": queue_status_data.get("message"),
-            },
-            "ai_review_summary": {
-                "total": review_total,
-                "counts": ai_status_counts,
-                "completed": ai_status_counts.get("completed", 0),
-                "failed": ai_status_counts.get("failed", 0),
-                "reviewing": ai_status_counts.get("reviewing", 0),
-                "pending": (
-                    ai_status_counts.get("queued", 0)
-                    + ai_status_counts.get("preparing", 0)
-                ),
-            },
             "runs": runs,
             "score_dimensions": (
                 R2V_SCORE_DIMENSIONS

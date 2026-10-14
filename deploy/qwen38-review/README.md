@@ -4,17 +4,18 @@ This replaces the local Qwen3-Omni review server while preserving the old
 container, model cache, and reports for rollback. The server remains bound to
 `127.0.0.1:8091` and exposes the same OpenAI-compatible model and chat APIs.
 
-The initial production profile uses the BF16 `Qwen/Qwen3.8-27B` checkpoint,
-one request at a time, 32K context, and no audio input. Candidate generation on
+The production profile uses the mixed W4A4 `RadixArk/Qwen3.8-27B-NVFP4` checkpoint,
+up to two concurrent requests, 64K context, and no audio input. The Personal
+Agent allows up to 8K output tokens per model call and automatically continues
+an answer when the output limit is reached. Candidate generation on
 the Windows lane remains independent; local ComfyUI and this review server are
 still mutually exclusive through the existing engine switch.
 Multimodal features use CPU transport because Docker's default security profile
 does not permit the `pidfd_getfd` operation required by CUDA IPC on this host.
-The installer adds a later systemd environment file for the review worker, so
-the existing `runtime.env` and its Omni rollback values stay untouched.
-Qwen's internal thinking mode is disabled for this continuous queue: the worker
-already uses two review passes, while dense-27B thinking made each candidate
-take tens of minutes on the DGX Spark.
+The video engine's own AI review queue and `model-test-review-worker` were retired on
+2026-09-27 (archived under `archive/retired_ai_review_20260927/`). This server is now used
+only by external clients such as `director-agent`, which reserve it through the
+`engine_scheduler` external lease so local H3 generation and Qwen never share the GPU.
 
 Install and create the container:
 

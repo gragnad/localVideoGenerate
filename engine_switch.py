@@ -36,7 +36,7 @@ VLLM_STOP_SCRIPT = Path(
 
 COMFY_START_TIMEOUT = float(os.environ.get("COMFY_START_TIMEOUT", "240"))
 COMFY_STOP_TIMEOUT = float(os.environ.get("COMFY_STOP_TIMEOUT", "120"))
-VLLM_START_TIMEOUT = float(os.environ.get("VLLM_START_TIMEOUT", "420"))
+VLLM_START_TIMEOUT = float(os.environ.get("VLLM_START_TIMEOUT", "900"))
 VLLM_STOP_TIMEOUT = float(os.environ.get("VLLM_STOP_TIMEOUT", "180"))
 
 

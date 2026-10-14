@@ -155,19 +155,21 @@ class ModelTestReviewsTest(unittest.TestCase):
         self.assertEqual({"h3_r2v_multi_reference"}, {row["input_mode"] for row in groups})
 
 
-    def test_ai_review_is_separate_and_human_review_has_display_priority(self):
-        ai = model_test_reviews.save_ai_review(
+    def test_archived_ai_review_is_read_only_and_human_review_has_display_priority(self):
+        ai = model_test_reviews._save_review(
             self.root,
             self.run_id,
             self.review_payload(2.5),
+            reviewer_kind="ai_benchmark",
             source_path="/tmp/benchmark_ai_review_report.json",
         )
         self.assertEqual(ai["review"]["reviewer_kind"], "ai_benchmark")
         results = model_test_reviews.session_results(self.root, self.session_id)
         target = next(item for item in results["runs"] if item["run_id"] == self.run_id)
         self.assertEqual(target["review"]["reviewer_kind"], "ai_benchmark")
-        self.assertEqual(target["ai_review_status"], "completed")
-        self.assertEqual(results["ai_review_summary"]["completed"], 1)
+        self.assertNotIn("ai_review_status", target)
+        self.assertNotIn("ai_review_summary", results)
+        self.assertNotIn("review_queue", results)
         comparison = model_test_reviews.comparison(self.root)
         self.assertEqual(
             comparison["groups"][0]["average_scores"]["prompt_adherence"], 2.5

@@ -8,6 +8,8 @@ import socket
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
+from windows_power_policy import get_policy
 from dataclasses import dataclass
 from typing import Any
 
@@ -89,7 +91,8 @@ def send_wake_on_lan(mac: str, broadcast: str, port: int = 9) -> None:
 
 
 class RemoteRenderPowerManager:
-    def __init__(self, config: Config | None) -> None:
+    def __init__(self, config: Config | None, *, root: Path | None = None) -> None:
+        self.root = root or Path(os.environ.get("VIDEO_ENGINE_ROOT", Path.home() / "local-ai/video-engine"))
         self.config = config
         self.wake_owned = False
         self.hibernate_armed = False
@@ -140,6 +143,55 @@ class RemoteRenderPowerManager:
             return response.get("status") == "ok"
         except (OSError, ValueError, urllib.error.URLError, json.JSONDecodeError):
             return False
+
+    def manual_wake(self) -> dict[str, Any]:
+        """Send WOL packets without waiting for Windows or ComfyUI startup."""
+        if not self.config:
+            raise RemoteRenderUnavailable("Windows 후보 렌더 설정이 없습니다.")
+        if self.agent_awake():
+            return {"status": "already_awake", "wake_packets_sent": 0}
+        if not self.config.wol_mac:
+            raise RemoteRenderUnavailable(
+                "Windows 렌더 PC의 WOL MAC 주소가 설정되지 않았습니다."
+            )
+        for _ in range(5):
+            send_wake_on_lan(
+                self.config.wol_mac,
+                self.config.wol_broadcast,
+                self.config.wol_port,
+            )
+        return {"status": "wake_sent", "wake_packets_sent": 5}
+
+    def manual_hibernate(self) -> dict[str, Any]:
+        """Schedule authenticated S4 hibernation after checking remote ComfyUI."""
+        if not self.config:
+            raise RemoteRenderUnavailable("Windows 후보 렌더 설정이 없습니다.")
+        if not self.agent_awake():
+            return {"status": "already_offline"}
+        if self._comfy_busy():
+            raise RemoteRenderUnavailable(
+                "Windows ComfyUI에 실행 또는 대기 작업이 있어 최대 절전할 수 없습니다."
+            )
+        try:
+            response = self._agent_request(
+                "POST",
+                "/v1/power/hibernate",
+                {"confirm": "hibernate"},
+                authenticated=True,
+                timeout=10.0,
+            )
+        except urllib.error.HTTPError as exc:
+            raise RemoteRenderUnavailable(
+                f"Windows 최대절전 API가 HTTP {exc.code}로 거절했습니다."
+            ) from exc
+        if response.get("status") != "hibernate_scheduled":
+            raise RemoteRenderUnavailable(
+                f"Windows 최대절전 요청 응답이 올바르지 않습니다: {response}"
+            )
+        return {
+            "status": "hibernate_scheduled",
+            "scheduled_in_seconds": int(response.get("scheduled_in_seconds") or 0),
+        }
 
     def ensure_comfy(self, client: Any) -> bool:
         """Return True when this worker had to wake the managed Windows host."""
@@ -223,6 +275,9 @@ class RemoteRenderPowerManager:
         )
 
     def maybe_hibernate(self) -> bool:
+        if not get_policy(self.root)["auto_hibernate_enabled"]:
+            self.last_activity = time.monotonic()
+            return False
         if (
             not self.config
             or not self.hibernate_armed
@@ -231,6 +286,9 @@ class RemoteRenderPowerManager:
         ):
             return False
         if self._comfy_busy():
+            self.last_activity = time.monotonic()
+            return False
+        if not get_policy(self.root)["auto_hibernate_enabled"]:
             self.last_activity = time.monotonic()
             return False
         try:

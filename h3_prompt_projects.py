@@ -19,7 +19,12 @@ PROJECT_KIND = "h3_r2v_production"
 WORKFLOW = "h3_r2v_production"
 I2V_PROJECT_KIND = "h3_i2v_production"
 I2V_WORKFLOW = "h3_i2v_production"
-PROJECT_KIND_MODES = {PROJECT_KIND: "r2v", I2V_PROJECT_KIND: "i2v"}
+ACTION_ASSET_PROJECT_KIND = "action_asset_project"
+PROJECT_KIND_MODES = {
+    PROJECT_KIND: "r2v",
+    I2V_PROJECT_KIND: "i2v",
+    ACTION_ASSET_PROJECT_KIND: "r2v",
+}
 WORKFLOW_MODES = {WORKFLOW: "r2v", I2V_WORKFLOW: "i2v"}
 PROTECTED_PROJECT_IDS = {"H3_PROJECT_TEMPLATE", "H3_I2V_PROJECT_TEMPLATE"}
 LEGACY_EVENT_CONTRACT_VERSION = "independent_shot_plans_v2"
@@ -32,6 +37,7 @@ ACTION_PROMPT_GENERATOR = "h3_action_scene_prompt_generator_v1"
 ACTION_SCENE_CONTRACT_VERSION = "action_scene_contract_v1"
 ISOLATED_ACTION_STORYBOARD_MODE = "delegated_entry_storyboard_action_delegated_exit_v1"
 FOUR_SHOT_TEMPORAL_STORYBOARD_MODE = "four_storyboard_panels_four_timed_action_shots_v1"
+SIX_SHOT_TEMPORAL_STORYBOARD_MODE = "six_storyboard_panels_six_timed_shots_v1"
 FOUR_SHOT_TEXT_DIRECTED_MODE = "four_text_directed_timed_action_shots_v1"
 FOUR_SUBJECT_STATE_ACTION_MODE = "four_subject_state_action_shots_v2"
 FOUR_OBJECT_ACTION_PAIRS_MODE = "four_object_action_pairs_v1"
@@ -133,9 +139,11 @@ def action_scene_routing_errors(payload: dict[str, Any]) -> list[str]:
     if not str(contract.get("environmental_proof") or "").strip():
         errors.append("액션 씬에는 environmental_proof가 필요합니다.")
     variants = payload.get("prompt_variants") or []
-    if len(variants) != 3:
-        errors.append("액션 씬은 A/D/E 프롬프트 세 개가 필요합니다.")
-    for variant in variants:
+    prompts = variants or [{
+        "variant_id": "video_prompt",
+        "video_prompt": payload.get("video_prompt"),
+    }]
+    for variant in prompts:
         variant_id = str(variant.get("variant_id") or "?")
         prompt = str(variant.get("video_prompt") or variant.get("prompt") or "")
         storyboard_mode = str(contract.get("storyboard_mode") or "").strip()
@@ -526,8 +534,10 @@ def _normalize_payload(root: Path, project_id: str, path: Path, payload: dict[st
         row.get("storyboard_mode") == FOUR_SHOT_ACTION_STORYBOARD_MODE
         for row in references
     )
-    if prompt_variants and len(prompt_variants) != 3:
-        errors.append("R2V 독립 후보 프롬프트는 클립마다 정확히 3개여야 합니다.")
+    allow_six_shots = any(
+        row.get("storyboard_mode") == SIX_SHOT_TEMPORAL_STORYBOARD_MODE
+        for row in references
+    )
     if not prompt:
         errors.append("video_prompt가 비어 있습니다.")
     if generation_mode == "r2v":
@@ -549,7 +559,7 @@ def _normalize_payload(root: Path, project_id: str, path: Path, payload: dict[st
                     if prompt_variants
                     else "video_prompt"
                 )
-                if contract_version == h3_prompt_contract.PASSTHROUGH_CONTRACT_VERSION:
+                if contract_version in h3_prompt_contract.PASSTHROUGH_CONTRACT_VERSIONS:
                     prompt_picture_ids = {
                         int(value)
                         for value in h3_prompt_contract.PICTURE_REFERENCE_RE.findall(
@@ -568,6 +578,7 @@ def _normalize_payload(root: Path, project_id: str, path: Path, payload: dict[st
                     duration_seconds=duration,
                     require_shot_timestamps=require_shot_timestamps,
                     allow_four_shots=allow_four_shots,
+                    allow_six_shots=allow_six_shots,
                 )
                 if not report.valid:
                     errors.extend(
@@ -600,6 +611,33 @@ def _normalize_payload(root: Path, project_id: str, path: Path, payload: dict[st
                         picture_id = int(reference["picture_index"])
                         panel_count = int(reference.get("storyboard_panel_count") or 0)
                         storyboard_mode = str(reference.get("storyboard_mode") or "")
+                        if storyboard_mode == SIX_SHOT_TEMPORAL_STORYBOARD_MODE:
+                            if panel_count != 6 or len(shot_rows) != 6:
+                                errors.append(
+                                    f"후보 {candidate_label}: Picture {picture_id}의 6패널을 "
+                                    "시간이 있는 6개 Shot으로 분리해야 합니다."
+                                )
+                                continue
+                            if not re.search(
+                                rf"^<Subject 1>\s+is\s+.*<Picture {picture_id}>",
+                                candidate_prompt,
+                                re.MULTILINE,
+                            ):
+                                errors.append(
+                                    f"후보 {candidate_label}: Picture {picture_id}를 완전한 "
+                                    "시간순 스토리보드 Subject로 정의해야 합니다."
+                                )
+                            for shot_number, shot_match in enumerate(shot_rows, start=1):
+                                body = shot_match.group(4)
+                                if (
+                                    f"<Picture {picture_id}>" not in body
+                                    or f"numbered action image {shot_number}" not in body.lower()
+                                ):
+                                    errors.append(
+                                        f"후보 {candidate_label} Shot {shot_number}: Picture "
+                                        f"{picture_id}의 numbered action image {shot_number} 연결이 필요합니다."
+                                    )
+                            continue
                         if storyboard_mode == ISOLATED_ACTION_STORYBOARD_MODE:
                             if panel_count != 4 or len(shot_rows) != 3:
                                 errors.append(
@@ -784,6 +822,7 @@ def _normalize_payload(root: Path, project_id: str, path: Path, payload: dict[st
                         duration_seconds=duration,
                         require_shot_timestamps=require_shot_timestamps,
                         allow_four_shots=four_shot_action_storyboard,
+                        allow_six_shots=allow_six_shots,
                     )
                     if report.shot_count < minimum_shots:
                         errors.append(
@@ -915,6 +954,7 @@ def list_projects(root: Path) -> dict[str, Any]:
             "title": str(manifest.get("title") or directory.name),
             "description": str(manifest.get("description") or ""),
             "generation_mode": generation_mode,
+            "project_kind": project_kind,
             "generation_blocked": bool(manifest.get("generation_blocked")),
             "generation_block_reason": str(
                 manifest.get("generation_block_reason") or ""
@@ -962,13 +1002,14 @@ def project_clips(root: Path, project_id: str) -> dict[str, Any]:
             clips.append(clip)
         except Exception as exc:
             clips.append({"project_id": project_id, "scene_id": path.parent.name, "clip_id": path.stem, "sequence": 0, "generation_mode": generation_mode, "ready": False, "errors": [str(exc)], "references": [], "video_prompt": "", "duration_seconds": 0})
-    clips.sort(key=lambda row: (str(row["scene_id"]), int(row.get("sequence") or 0), str(row["clip_id"])))
+    clips.sort(key=lambda row: (int(row.get("sequence") or 0), str(row["scene_id"]), str(row["clip_id"])))
     scenes: dict[str, list[dict[str, Any]]] = {}
     for clip in clips:
         scenes.setdefault(str(clip["scene_id"]), []).append(clip)
     return {
         "project_id": project_id,
         "generation_mode": generation_mode,
+        "project_kind": str(manifest.get("project_kind") or ""),
         "generation_blocked": bool(manifest.get("generation_blocked")),
         "generation_block_reason": str(
             manifest.get("generation_block_reason") or ""

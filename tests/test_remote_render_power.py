@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest import mock
 
-from remote_render_power import Config, RemoteRenderPowerManager
+from remote_render_power import Config, RemoteRenderPowerManager, RemoteRenderUnavailable
 
 
 class _Client:
@@ -20,6 +20,18 @@ class _Client:
 
 
 class RemoteRenderPowerTests(unittest.TestCase):
+    @staticmethod
+    def config(**updates):
+        values = {
+            "comfy_url": "http://100.78.202.37:8189",
+            "agent_url": "http://100.78.202.37:8766",
+            "agent_token": "secret",
+            "wol_mac": "b0:82:e2:37:a1:8a",
+            "wol_broadcast": "172.30.1.255",
+        }
+        values.update(updates)
+        return Config(**values)
+
     def test_config_uses_candidate_render_and_dedicated_power_values(self):
         with mock.patch.dict(os.environ, {
             "H3_CANDIDATE_COMFY_URL": "http://100.78.202.37:8189/",
@@ -52,6 +64,51 @@ class RemoteRenderPowerTests(unittest.TestCase):
             self.assertTrue(manager.ensure_comfy(client))
         self.assertTrue(manager.wake_owned)
         self.assertEqual(5, wake.call_count)
+
+    def test_manual_wake_sends_five_packets_without_waiting(self):
+        manager = RemoteRenderPowerManager(self.config())
+        with mock.patch.object(manager, "agent_awake", return_value=False), mock.patch(
+            "remote_render_power.send_wake_on_lan"
+        ) as wake:
+            result = manager.manual_wake()
+        self.assertEqual("wake_sent", result["status"])
+        self.assertEqual(5, result["wake_packets_sent"])
+        self.assertEqual(5, wake.call_count)
+
+    def test_manual_wake_is_idempotent_when_agent_is_awake(self):
+        manager = RemoteRenderPowerManager(self.config())
+        with mock.patch.object(manager, "agent_awake", return_value=True), mock.patch(
+            "remote_render_power.send_wake_on_lan"
+        ) as wake:
+            result = manager.manual_wake()
+        self.assertEqual("already_awake", result["status"])
+        wake.assert_not_called()
+
+    def test_manual_hibernate_blocks_busy_comfy_and_sends_authenticated_request(self):
+        manager = RemoteRenderPowerManager(self.config())
+        with mock.patch.object(manager, "agent_awake", return_value=True), mock.patch.object(
+            manager, "_comfy_busy", return_value=True
+        ), mock.patch.object(manager, "_agent_request") as request:
+            with self.assertRaisesRegex(RemoteRenderUnavailable, "ComfyUI"):
+                manager.manual_hibernate()
+        request.assert_not_called()
+
+        with mock.patch.object(manager, "agent_awake", return_value=True), mock.patch.object(
+            manager, "_comfy_busy", return_value=False
+        ), mock.patch.object(
+            manager,
+            "_agent_request",
+            return_value={"status": "hibernate_scheduled", "scheduled_in_seconds": 2},
+        ) as request:
+            result = manager.manual_hibernate()
+        self.assertEqual("hibernate_scheduled", result["status"])
+        request.assert_called_once_with(
+            "POST",
+            "/v1/power/hibernate",
+            {"confirm": "hibernate"},
+            authenticated=True,
+            timeout=10.0,
+        )
 
     def test_healthy_host_arms_hibernation_without_wol_ownership(self):
         config = Config(

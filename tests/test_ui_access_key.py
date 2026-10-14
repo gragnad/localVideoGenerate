@@ -21,6 +21,15 @@ class UIContractTest(unittest.TestCase):
         self.assertGreaterEqual(self.app.count("sessionStorage.getItem('h3-key')"), 2)
         self.assertNotIn("ltx-key", self.app)
 
+    def test_python_bridge_streams_large_json_without_execfile_maxbuffer(self):
+        bridge = self.server.split("async function python", 1)[1].split(
+            "async function saveUpload", 1
+        )[0]
+        self.assertIn("spawn(", bridge)
+        self.assertIn("child.stdout.on('data'", bridge)
+        self.assertIn("Buffer.concat(stdout)", bridge)
+        self.assertNotIn("maxBuffer", bridge)
+
     def test_navigation_contains_only_current_h3_and_model_pages(self):
         pages = {
             "create": "01 H3 R2V 생성",
@@ -28,9 +37,10 @@ class UIContractTest(unittest.TestCase):
             "queue": "03 큐 · 진행",
             "candidates": "04 후보 선택",
             "results": "05 결과 확인",
-            "model-management": "06 모델 관리",
-            "model-tests": "07 모델 테스트",
-            "r2v-tests": "08 R2V 테스트",
+            "action-assets": "06 액션 자산",
+            "model-management": "07 모델 관리",
+            "model-tests": "08 모델 테스트",
+            "r2v-tests": "09 R2V 테스트",
         }
         for page, label in pages.items():
             self.assertIn(f'data-page="{page}"', self.index)
@@ -43,7 +53,25 @@ class UIContractTest(unittest.TestCase):
             self.assertNotIn(f'data-page="{removed}"', self.index)
             self.assertNotIn(f'data-view="{removed}"', self.index)
 
-    def test_h3_queue_candidate_and_model_review_controls_remain(self):
+    def test_action_asset_upload_supports_blender_video_provenance(self):
+        for marker in (
+            'value="blender_render"',
+            'id="h3ActionSourceType"',
+            'name="blender_project_file"',
+            'name="blender_scene_name"',
+            'name="blender_action_name"',
+            'name="blender_version"',
+            'name="blender_render_engine"',
+            'id="h3ActionFilterSource"',
+            '.avi',
+        ):
+            self.assertIn(marker, self.index)
+        self.assertIn("blender_render:'Blender 제작'", self.app)
+        self.assertIn("function syncH3ActionSourceFields()", self.app)
+        self.assertIn("sourceType==='blender_render'", self.app)
+        self.assertIn("asset.blender_source||{}", self.app)
+
+    def test_h3_queue_candidate_and_human_model_review_controls_remain(self):
         for marker in (
             'id="h3CreateForm"', 'id="h3Project"', 'id="h3Scene"',
             'id="i2vCreateForm"', 'id="i2vProject"', 'id="i2vStartImage"',
@@ -54,8 +82,8 @@ class UIContractTest(unittest.TestCase):
         self.assertIn("data-force-h3-group", self.app)
         self.assertIn("/api/h3/queue-groups/", self.app)
         self.assertIn("/api/model-tests/sessions/", self.app)
-        self.assertIn("AI 검수 큐 등록", self.app)
-        self.assertIn("canAi=(item.run_count||0)>0", self.app)
+        self.assertNotIn("AI 검수 큐 등록", self.app)
+        self.assertNotIn("data-test-ai-review", self.app)
 
         backend = (ROOT / "ui_backend.py").read_text(encoding="utf-8")
         h3_config = backend.split("def h3_config", 1)[1].split(
@@ -70,26 +98,27 @@ class UIContractTest(unittest.TestCase):
             h3_config,
         )
 
-    def test_candidate_page_has_continuous_local_ai_review_toggle_and_feedback(self):
-        self.assertIn('id="h3CandidateAiReviewToggle"', self.index)
-        self.assertIn('id="h3CandidateAiReviewStatus"', self.index)
-        self.assertIn("/api/h3/candidate-ai-review", self.app)
-        self.assertIn("function toggleH3CandidateAiReview", self.app)
-        self.assertIn("function decorateH3CandidateAiReviews", self.app)
-        self.assertIn("검수 AI 수정의견", self.app)
-        self.assertIn("candidate_story_continuity_v3", self.app)
-        self.assertIn("현재 시나리오 연출", self.app)
-        self.assertIn("이전 클립 연결", self.app)
-        self.assertIn("다음 클립 연결", self.app)
-        self.assertIn("검수 AI 시나리오·연결 의견", self.app)
-        self.assertIn("수정 의견에 반영", self.app)
-        self.assertIn("h3_candidate_review", self.server)
-        self.assertIn("'set_h3_candidate_ai_review'", self.server)
+    def test_candidate_page_and_api_omit_prompt_revision_and_ai_review(self):
+        self.assertNotIn('id="h3CandidateAiReviewToggle"', self.index)
+        self.assertNotIn('id="h3CandidateAiReviewStatus"', self.index)
+        self.assertNotIn("연출 의도와 전체 프롬프트", self.app)
+        self.assertNotIn("세 후보가 모두 맞지 않을 때", self.app)
+        self.assertNotIn("검수 AI 시나리오·연결 의견", self.app)
+        self.assertNotIn("function decorateH3CandidateAiReviews", self.app)
+        self.assertNotIn("data-h3-feedback-revision", self.app)
+        self.assertNotIn("h3_candidate_review", self.server)
+        self.assertNotIn("candidate-ai-review", self.server)
         backend = (ROOT / "ui_backend.py").read_text(encoding="utf-8")
-        self.assertIn("def set_h3_candidate_ai_review", backend)
-        self.assertIn('"set_h3_candidate_ai_review": set_h3_candidate_ai_review', backend)
-        self.assertIn("candidate_ai_review", (ROOT / "h3_queue.py").read_text(encoding="utf-8"))
-        self.assertIn(".h3-candidate-ai-feedback{", self.styles)
+        self.assertNotIn("ai_review", backend)
+        self.assertNotIn("review_queue", backend)
+        queue_source = (ROOT / "h3_queue.py").read_text(encoding="utf-8")
+        state_source = queue_source.split("def state(root:", 1)[1].split(
+            "def select_candidate", 1
+        )[0]
+        self.assertNotIn("candidate_ai_review", state_source)
+        self.assertIn("compact=True", backend)
+        self.assertIn("/api/h3/candidate-page", self.server)
+        self.assertIn("/api/h3/results-page", self.server)
 
     def test_individual_h3_r2v_duration_allows_half_seconds(self):
         r2v_form = self.index.split('<form id="h3CreateForm"', 1)[1].split(
@@ -106,39 +135,27 @@ class UIContractTest(unittest.TestCase):
         )
         self.assertIn("duration_seconds:Number(form.get('duration_seconds'))", self.app)
 
-    def test_r2v_allows_matching_candidate_prompts_feedback_rounds_and_versions(self):
-        for marker in (
-            'name="prompt_a"', 'name="prompt_b"', 'name="prompt_c"',
-            'id="h3ClipVersionPanel"', 'id="h3ClipVersionList"',
-        ):
-            self.assertIn(marker, self.index)
-        self.assertIn("prompt_variants:promptVariants", self.app)
-        self.assertNotIn("new Set(prompts).size!==3", self.app)
-        self.assertNotIn("서로 다른 독립 프롬프트여야 합니다", self.app)
-        self.assertIn("function saveH3FeedbackRevisionRequest", self.app)
-        self.assertIn("/revision-requests`,", self.app)
-        self.assertIn("로컬 언어 모델과 영상 생성은 실행되지 않습니다", self.app)
-        self.assertIn("prompt_revision_requests", self.app)
-        self.assertIn("authored_prompt_variants", self.app)
-        self.assertIn("function h3AuthoredPromptVersionsForClip", self.app)
-        self.assertIn("function h3ProjectPromptSelection", self.app)
-        self.assertIn("function selectH3ClipPromptVersion", self.app)
-        self.assertIn("if(authored.length)h3SelectedClipPromptVersion={kind:'authored'", self.app)
-        self.assertIn("if(!h3SelectedClipPromptVersion&&authored.length)", self.app)
-        self.assertIn("data-h3-select-authored-version", self.app)
-        self.assertIn("사용할 Prompt 버전을 선택하세요", self.app)
-        self.assertIn("promptVariantMeta", self.app)
-        self.assertIn("function restoreH3ClipVersion", self.app)
-        self.assertIn("/restore`,", self.app)
-        self.assertIn("data-h3-feedback-revision", self.app)
-        self.assertIn("data-h3-restore-version", self.app)
-        self.assertIn(".h3-prompt-variants{", self.styles)
-        self.assertIn(".h3-clip-version-panel{", self.styles)
-        self.assertIn(".h3-candidate-revision{", self.styles)
-        self.assertNotIn("data-h3-authored-revision-draft", self.app)
-        self.assertIn("python('save_h3_prompt_revision_request'", self.server)
-        self.assertIn("python('apply_h3_prompt_revision'", self.server)
-        self.assertIn("python('restore_h3_candidate_version'", self.server)
+    def test_r2v_uses_one_prompt_and_seed_varied_candidate_count(self):
+        self.assertIn('name="prompt"', self.index)
+        self.assertIn('name="candidate_count"', self.index)
+        self.assertNotIn('name="prompt_a"', self.index)
+        self.assertNotIn('name="prompt_b"', self.index)
+        self.assertNotIn('name="prompt_c"', self.index)
+        self.assertNotIn('id="h3ClipVersionPanel"', self.index)
+        self.assertNotIn('id="h3ClipVersionList"', self.index)
+        self.assertIn("prompt,duration_seconds:Number(form.get('duration_seconds'))", self.app)
+        self.assertIn("candidate_count:candidateCount", self.app)
+        self.assertNotIn("prompt_variants:promptVariants", self.app)
+        self.assertNotIn("function saveH3FeedbackRevisionRequest", self.app)
+        self.assertNotIn("/revision-requests`,", self.app)
+        self.assertNotIn("function h3AuthoredPromptVersionsForClip", self.app)
+        self.assertNotIn("function restoreH3ClipVersion", self.app)
+        self.assertNotIn("/restore`,", self.app)
+        self.assertIn(".h3-prompt-single{", self.styles)
+        self.assertNotIn(".h3-clip-version-panel{", self.styles)
+        self.assertNotIn("python('save_h3_prompt_revision_request'", self.server)
+        self.assertNotIn("python('apply_h3_prompt_revision'", self.server)
+        self.assertNotIn("python('restore_h3_candidate_version'", self.server)
 
     def test_h3_r2v_project_can_be_deleted_with_confirmation_and_backend_checks(self):
         self.assertIn('id="deleteH3Project"', self.index)
@@ -301,7 +318,7 @@ class UIContractTest(unittest.TestCase):
     def test_model_test_queue_registration_stays_on_current_page(self):
         queue_handler = self.app.split(
             '$$("[data-test-queue]")', 1
-        )[1].split('$$("[data-test-ai-review]")', 1)[0]
+        )[1].split("$$('[data-test-results]')", 1)[0]
         self.assertIn("await refreshH3State()", queue_handler)
         self.assertNotIn('goPage("queue")', queue_handler)
 
@@ -347,9 +364,20 @@ class UIContractTest(unittest.TestCase):
         self.assertIn(".windows-pc-status{", self.styles)
         self.assertIn(".windows-pc-status.is-awake", self.styles)
 
+    def test_sidebar_exposes_safe_manual_windows_power_controls(self):
+        self.assertIn('data-windows-power="wake"', self.app)
+        self.assertIn('data-windows-power="hibernate"', self.app)
+        self.assertIn("PC 끄기 · 최대 절전", self.app)
+        self.assertIn("렌더 작업 중에는 최대 절전이 차단됩니다.", self.app)
+        self.assertIn("/api/windows-render-power", self.app)
+        self.assertIn("async function controlWindowsPc(action)", self.app)
+        self.assertIn("url.pathname === '/api/windows-render-power'", self.server)
+        self.assertIn("'control_windows_render_power'", self.server)
+        self.assertIn(".windows-pc-actions{", self.styles)
+
     def test_windows_candidate_and_local_generation_queues_are_separate(self):
         self.assertIn("Windows 후보 큐와 로컬 생성 큐를 서로 독립적으로 실행합니다.", self.index)
-        self.assertIn("05 해상도 재생성과 07·08 모델 테스트는 로컬", self.index)
+        self.assertIn("05 해상도 재생성과 08·09 모델 테스트는 로컬", self.index)
         self.assertIn("function h3JobQueueLane(job)", self.app)
         self.assertIn("Windows 후보 큐", self.app)
         self.assertIn("로컬 생성 큐", self.app)
@@ -468,8 +496,10 @@ class UIContractTest(unittest.TestCase):
         self.assertIn("projectLabel", source_filters)
         self.assertNotIn("episodeMatch", source_filters)
         self.assertNotIn("EP\\d+", source_filters)
-        self.assertIn("function syncH3SourceFilters(kind,sets)", self.app)
+        self.assertIn("function syncH3SourceFilters(kind,sets=[])", self.app)
         self.assertIn("function h3FilteredSourceSets(kind,sets)", self.app)
+        self.assertIn("function refreshH3PagedState(kind)", self.app)
+        self.assertIn("page_size:String(pageSize)", self.app)
         self.assertIn("renderH3CandidatesUnfiltered", self.app)
         self.assertIn("renderH3ResultsUnfiltered", self.app)
         self.assertIn("h3CandidatesPage=1", self.app)
@@ -495,6 +525,45 @@ class UIContractTest(unittest.TestCase):
         self.assertIn("`해상도 ${width} × ${height}`", candidate_render)
         self.assertIn("${sourceLabel} · ${esc(resolutionLabel)}", candidate_render)
 
+    def test_h3_candidate_page_displays_archived_storyboard_references(self):
+        self.assertIn("function h3CandidateStoryboardReferences", self.app)
+        self.assertIn("role.includes('storyboard')", self.app)
+        self.assertIn("function h3CandidateAnchorReferences", self.app)
+        self.assertIn("role==='single_full_frame_event_anchor'", self.app)
+        self.assertIn("function h3CandidateReviewVisuals", self.app)
+        self.assertIn("anchors.length?{kind:'anchor'", self.app)
+        self.assertIn("function mountH3CandidateStoryboards", self.app)
+        self.assertIn("사용한 단일 앵커", self.app)
+        self.assertIn("영상 안에서 도달해야 하는 기준 프레임", self.app)
+        self.assertIn("사용한 스토리보드", self.app)
+        self.assertIn("후보 생성 당시 보관본", self.app)
+        self.assertIn("mountH3CandidateStoryboards(container)", self.app)
+        self.assertIn(
+            "/api/h3/candidate-sets/${encodeURIComponent(setId)}/references/",
+            self.app,
+        )
+        self.assertIn(".h3-candidate-storyboards{", self.styles)
+        self.assertIn(".h3-candidate-storyboard-preview{", self.styles)
+        self.assertIn("h3_candidate_reference", self.server)
+        self.assertIn("candidate-sets\\/([^/]+)\\/references\\/(\\d+)", self.server)
+
+        backend = (ROOT / "ui_backend.py").read_text(encoding="utf-8")
+        self.assertIn("def h3_candidate_reference", backend)
+        self.assertIn("h3_queue.candidate_reference_path", backend)
+        self.assertIn('"h3_candidate_reference": h3_candidate_reference', backend)
+
+    def test_h3_candidate_cards_show_embedding_effect_state_and_name(self):
+        self.assertIn("function h3EmbeddingEffectInfo", self.app)
+        self.assertIn("function h3EmbeddingEffectBadge", self.app)
+        self.assertIn("embedding_effect_applied", self.app)
+        self.assertIn("embedding_effects", self.app)
+        self.assertIn("Embedding Effect", self.app)
+        self.assertIn("효과 이름 확인 필요", self.app)
+        self.assertIn("미적용", self.app)
+        self.assertIn("h3EmbeddingEffectBadge(request,variantPrompt)", self.app)
+        self.assertIn(".h3-embedding-effect.active{", self.styles)
+        self.assertIn(".h3-embedding-effect.inactive{", self.styles)
+
     def test_h3_candidate_sets_can_force_stop_then_delete_when_terminal(self):
         self.assertIn("h3CandidateTerminalStatuses", self.app)
         self.assertIn("statuses.every(status=>h3CandidateTerminalStatuses.has(status))", self.app)
@@ -502,11 +571,14 @@ class UIContractTest(unittest.TestCase):
         self.assertIn("현재 큐 강제종료", self.app)
         self.assertIn("forceStopH3Group(button.dataset.h3ForceCandidateSet,true)", self.app)
         self.assertIn("data-h3-delete-candidate-set", self.app)
-        self.assertIn("runtime.terminal?'':'disabled'", self.app)
+        self.assertIn("runtime.terminal&&!selectedJobs.length?'':'disabled'", self.app)
+        self.assertIn("function h3CandidateSetHasSelection(set)", self.app)
+        self.assertIn("remove.disabled=!state.terminal||selected", self.app)
+        self.assertIn("선택된 후보가 있어 삭제할 수 없습니다", self.app)
         self.assertIn("async function deleteH3CandidateSet", self.app)
         self.assertIn("후보군 ${setId}을(를) 목록에서 제외할까요?", self.app)
-        self.assertIn("완료된 AI 검수는 보존됩니다", self.app)
-        self.assertIn("미완료 AI 검수는 취소됩니다", self.app)
+        self.assertIn("생성 영상과 작업 기록, 소스는 보존됩니다", self.app)
+        self.assertNotIn("review_cleanup", self.app)
         delete_function = self.app.split(
             "async function deleteH3CandidateSet", 1
         )[1].split("function renderH3Candidates", 1)[0]
@@ -528,7 +600,8 @@ class UIContractTest(unittest.TestCase):
         self.assertIn("function h3CandidateQueuedOnly(set)", self.app)
         self.assertIn("body:JSON.stringify({queued_only:true})", self.app)
         self.assertIn("이미 실행 중인 후보군과 완료된 결과는 건드리지 않습니다.", self.app)
-        self.assertIn("filter(set=>h3CandidateSetRuntimeState(set).terminal)", self.app)
+        self.assertIn("terminal&&!h3CandidateSetHasSelection(set)", self.app)
+        self.assertIn("선택된 후보군과 실행·대기 중인 후보군은 제외", self.app)
         self.assertIn(".h3-page-bulk-actions", self.styles)
 
     def test_h3_terminal_candidate_set_can_be_requeued_from_candidate_page(self):
@@ -600,6 +673,7 @@ class UIContractTest(unittest.TestCase):
             'id="h3PicturePreviewTitle"',
             'id="h3PicturePreviewMeta"',
             'id="h3PicturePreviewImage"',
+            'id="h3PicturePreviewDownload"',
             'id="h3PicturePreviewClose"',
         ):
             self.assertIn(marker, self.index)
@@ -607,12 +681,17 @@ class UIContractTest(unittest.TestCase):
         self.assertIn('data-h3-reference-remove', self.app)
         self.assertIn('function openH3PicturePreview', self.app)
         self.assertIn('openH3PicturePreview(config.asset_url', self.app)
+        self.assertIn('function downloadH3PicturePreview', self.app)
+        self.assertIn("headers['x-access-key-b64']=asciiKey(key)", self.app)
+        self.assertIn('link.download=h3PictureFilename', self.app)
+        self.assertIn("addEventListener('click',downloadH3PicturePreview)", self.app)
         self.assertIn('dialog.showModal()', self.app)
         self.assertIn("event.target===event.currentTarget", self.app)
         self.assertIn("addEventListener('cancel'", self.app)
         self.assertIn("addEventListener('close',clearH3PicturePreviewSource)", self.app)
         self.assertIn('.h3-linked-picture-preview{', self.styles)
         self.assertIn('.h3-picture-preview-dialog{', self.styles)
+        self.assertIn('.h3-picture-preview-actions{', self.styles)
         self.assertIn('object-fit:contain', self.styles)
 
     def test_h3_create_uses_selected_production_resolution(self):
@@ -639,7 +718,10 @@ class UIContractTest(unittest.TestCase):
         self.assertIn('{width:960,height:544}', self.app)
         self.assertIn('{width:1024,height:576}', self.app)
         self.assertIn('{width:1280,height:736}', self.app)
-        self.assertIn("item.width===1024&&item.height===576?'selected':''", self.app)
+        self.assertIn(
+            "item.width===1024&&item.height===576?'selected':item===defaultOption?'selected':''",
+            self.app,
+        )
         self.assertIn("form.get('resolution')", self.app)
         self.assertIn("width:resolution[0],height:resolution[1]", self.app)
 
@@ -711,7 +793,7 @@ class UIContractTest(unittest.TestCase):
         self.assertIn("function collectH3SolAttnWorkflowSettings()", self.app)
         self.assertIn("data.workflow_settings=workflowSettings", self.app)
 
-    def test_update_attention_r2v_workflow_is_the_default_combo_option(self):
+    def test_int8_alibaba_turbo_r2v_workflow_is_the_default_combo_option(self):
         registry = (ROOT / "model_test_registry.py").read_text(encoding="utf-8")
         r2v = (ROOT / "model_test_r2v.py").read_text(encoding="utf-8")
         self.assertIn(
@@ -719,21 +801,22 @@ class UIContractTest(unittest.TestCase):
             r2v,
         )
         self.assertIn(
-            '"(basic)video_minimax_h3_r2v_updateAttn_api.json"',
+            'R2V_INT8_TURBO_WORKFLOW_FILENAME = (',
             r2v,
         )
         self.assertIn(
-            "R2V_DEFAULT_WORKFLOW_FILENAME = R2V_UPDATE_ATTN_WORKFLOW_FILENAME",
+            "R2V_DEFAULT_WORKFLOW_FILENAME = R2V_INT8_TURBO_WORKFLOW_FILENAME",
             r2v,
         )
         self.assertIn(
-            '"filename": model_test_r2v.R2V_UPDATE_ATTN_WORKFLOW_FILENAME',
+            '"filename": model_test_r2v.R2V_INT8_TURBO_WORKFLOW_FILENAME',
             registry,
         )
         self.assertIn(
-            "R2V_DEFAULT_WORKFLOW_FILENAME='(basic)video_minimax_h3_r2v_updateAttn_api.json'",
+            "R2V_DEFAULT_WORKFLOW_FILENAME='(basic)video_minimax_h3_r2v_int8_turbo_api.json'",
             self.app,
         )
+        self.assertIn("'(basic)video_minimax_h3_r2v_updateAttn_api.json'", self.app)
         self.assertIn("row.default_for_generation?'기본 · ':''", self.app)
         self.assertIn("if(preferred)select.value=preferred.adapter_id", self.app)
         self.assertIn(
@@ -761,7 +844,9 @@ class UIContractTest(unittest.TestCase):
         self.assertIn("candidate_set_id: decodeURIComponent", route)
         self.assertIn("source_job_id", self.app)
         self.assertIn("def create_h3_resolution_rerender", backend)
+        self.assertIn("model_test_registry.ensure_h3_r2v_adapter(ROOT, WORKFLOW_DIR)", backend)
         self.assertIn("h3_queue.enqueue_selected_candidate_rerender", backend)
+        self.assertIn("현재 기본 INT8 + Alibaba Turbo 워크플로우", self.app)
         self.assertIn(
             '"create_h3_resolution_rerender": create_h3_resolution_rerender',
             backend,
@@ -785,6 +870,15 @@ class UIContractTest(unittest.TestCase):
         self.assertIn("h3SelectedResolutionRerender", self.app)
         self.assertIn("h3RerenderHistory", self.app)
         self.assertIn("data-h3-rerender-source-select", self.app)
+        self.assertIn("data-h3-rerender-delete", self.app)
+        self.assertIn("deleteH3RerenderRecord", self.app)
+        self.assertIn("기록 삭제", self.app)
+        self.assertIn("h3RerenderRiskMessage", self.app)
+        self.assertIn("data-h3-resolution-risk", self.app)
+        self.assertIn("data-rerender-estimates", self.app)
+        self.assertIn("동일 조건 성공", self.app)
+        self.assertIn("가까운 성공", self.app)
+        self.assertIn("안정성이 중요하면 1024 × 576을 권장합니다", self.app)
         self.assertIn("해상도 재생성 기록", self.app)
         self.assertIn("업스케일 원본으로 선택", self.app)
         self.assertIn(".h3-rerender-history-row.selected", self.styles)
@@ -856,8 +950,10 @@ class UIContractTest(unittest.TestCase):
         self.assertIn("리뷰 revision 저장", self.index)
         self.assertIn("</form></dialog>", self.index)
         self.assertEqual(1, self.index.count("</main>"))
-        self.assertIn('/styles.css?v=20260816-39', self.index)
-        self.assertIn('/app.js?v=20260822-98', self.index)
+        self.assertIn('/styles.css?v=20260906-42', self.index)
+        self.assertIn('/app.js?v=20261003-108', self.index)
+        self.assertIn('/frame-annotations.js?v=1', self.index)
+        self.assertIn('id="frameAnnotationDialog"', self.index)
 
     def test_initial_registry_refreshes_are_sequential(self):
         refresh_function = self.app.split(

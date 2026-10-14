@@ -14,7 +14,6 @@ import urllib.request
 from pathlib import Path
 from unittest import mock
 
-import candidate_review_queue
 import h3_queue
 import h3_prompt_projects
 import h3_worker
@@ -26,6 +25,39 @@ from job_queue import read_json, update_status
 
 
 class H3QueueTests(unittest.TestCase):
+    def test_candidate_reference_path_serves_only_the_archived_set_copy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            set_dir = root / "runtime/h3/candidate_sets/set-1"
+            source = set_dir / "sources/picture_01.png"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"storyboard")
+            atomic_write_json(set_dir / "candidate_set.json", {
+                "candidate_set_id": "set-1",
+                "references": [{
+                    "picture_index": 1,
+                    "role": "complete_six_panel_storyboard",
+                    "source_path": str(source),
+                }],
+            })
+
+            self.assertEqual(
+                source.resolve(), h3_queue.candidate_reference_path(root, "set-1", 1)
+            )
+
+            outside = root / "current-project-storyboard.png"
+            outside.write_bytes(b"changed")
+            atomic_write_json(set_dir / "candidate_set.json", {
+                "candidate_set_id": "set-1",
+                "references": [{
+                    "picture_index": 1,
+                    "role": "complete_six_panel_storyboard",
+                    "source_path": str(outside),
+                }],
+            })
+            with self.assertRaisesRegex(FileNotFoundError, "보관본 바깥"):
+                h3_queue.candidate_reference_path(root, "set-1", 1)
+
     def test_superseded_prompt_project_is_blocked_before_candidate_creation(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -291,7 +323,7 @@ class H3QueueTests(unittest.TestCase):
             image.write_bytes(b"image")
             candidate = h3_queue.enqueue_candidate_set(root, {
                 "adapter_id": adapter["adapter_id"], "generation_mode": "i2v",
-                "prompt": "The hero steps forward.", "references": [{"upload_path": str(image), "role": "start_frame"}],
+                "prompt": "The hero steps forward.", "references": [{"upload_path": str(image), "role": "start_frame", "reference_kind": "keyframe"}],
                 "candidate_count": 1, "seed": -1, "width": 1376, "height": 768,
             })
             request = read_json(root / "runtime/h3/jobs" / candidate["candidate_job_ids"][0] / "request.json")
@@ -299,6 +331,7 @@ class H3QueueTests(unittest.TestCase):
             self.assertEqual("i2v", request["generation_mode"])
             self.assertEqual("h3_r2v_generate", request["job_type"])
             self.assertEqual("start_frame", request["references"][0]["role"])
+            self.assertEqual("keyframe", request["references"][0]["reference_kind"])
             self.assertEqual((1376, 768), (request["width"], request["height"]))
             queued_workflow = read_json(
                 root / "runtime/h3/jobs" / candidate["candidate_job_ids"][0] / "workflow_api.json"
@@ -558,7 +591,8 @@ A restrained low string pulse."""
             image.write_bytes(b"immutable-reference")
             seed = 317375066245886502
 
-            def compile_workflow(_root, _adapter_id, values, _count, expected=None, _settings=None):
+            def compile_workflow(_root, adapter_id, values, _count, expected=None, _settings=None):
+                use_default = adapter_id == "adapter_default"
                 return (
                     {
                         "1": {
@@ -577,14 +611,33 @@ A restrained low string pulse."""
                     },
                     [{"node_id": "1", "input": "image"}],
                     {
-                        "workflow_profile_id": "workflow_h3",
-                        "workflow_filename": "h3.json",
+                        "adapter_id": adapter_id,
+                        "workflow_profile_id": (
+                            "workflow_default" if use_default else "workflow_h3"
+                        ),
+                        "workflow_filename": (
+                            "int8_turbo.json" if use_default else "h3.json"
+                        ),
                         "generation_mode": expected or "r2v",
                         "workflow_settings": {},
                     },
                 )
 
-            with mock.patch.object(h3_queue, "_compile_workflow", side_effect=compile_workflow):
+            # 운영과 같은 환경: Windows 후보 주소가 설정돼 있어도 재생성은 로컬 8188로 간다.
+            with mock.patch.dict(os.environ, {
+                "COMFY_URL": "http://127.0.0.1:8188",
+                "H3_CANDIDATE_COMFY_URL": "http://100.78.202.37:8189",
+            }, clear=False), mock.patch.object(
+                h3_queue, "_compile_workflow", side_effect=compile_workflow
+            ), mock.patch.object(
+                h3_queue,
+                "_current_default_r2v_adapter",
+                return_value={
+                    "adapter_id": "adapter_default",
+                    "workflow_profile_id": "workflow_default",
+                    "workflow_filename": "int8_turbo.json",
+                },
+            ):
                 source = h3_queue.enqueue_candidate_set(root, {
                     "adapter_id": "adapter_h3",
                     "prompt": "Shot 1: The hero runs.",
@@ -642,6 +695,9 @@ A restrained low string pulse."""
                 rerender["candidate_set_id"], random_rerender["candidate_set_id"]
             )
             self.assertEqual("resolution_rerender", rerender["render_purpose"])
+            self.assertEqual("current_default", rerender["rerender_workflow_policy"])
+            self.assertEqual("workflow_h3", rerender["source_workflow_profile_id"])
+            self.assertEqual("h3.json", rerender["source_workflow_filename"])
             self.assertEqual("preserved", rerender["seed_mode"])
             self.assertEqual(seed, rerender["source_seed"])
             self.assertEqual(seed, rerender["rerender_seed"])
@@ -663,15 +719,15 @@ A restrained low string pulse."""
             self.assertEqual("local_comfy", rerender_request["render_target"])
             self.assertEqual("http://127.0.0.1:8188", rerender_request["comfy_url"])
             self.assertEqual("local_generation", rerender["queue_lane"])
+            self.assertEqual("adapter_default", rerender_request["adapter_id"])
+            self.assertEqual("workflow_default", rerender_request["workflow_profile_id"])
+            self.assertEqual("int8_turbo.json", rerender_request["workflow_filename"])
+            self.assertEqual({}, rerender_request["workflow_settings"])
             for key in (
                 "prompt",
                 "seed",
                 "duration_seconds",
-                "adapter_id",
-                "workflow_profile_id",
-                "workflow_filename",
                 "generation_mode",
-                "workflow_settings",
                 "source_project_id",
                 "source_scene_id",
                 "source_clip_id",
@@ -701,6 +757,36 @@ A restrained low string pulse."""
                 [row["job_id"] for row in stored_source["selected_jobs"]],
             )
 
+    def test_selected_portrait_i2v_result_queues_direct_1080x1920_upscale(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = h3_queue.roots(root)
+            set_id, job_id = "h3set_i2v", "h3job_i2v"
+            atomic_write_json(
+                paths["candidate_sets"] / set_id / "candidate_set.json",
+                {"candidate_set_id": set_id, "candidate_job_ids": [job_id], "generation_mode": "i2v",
+                 "selected_job_id": job_id, "selected_jobs": [{"job_id": job_id}], "source_clip_id": "hello"},
+            )
+            video = root / "i2v.mp4"
+            video.write_bytes(b"i2v-video")
+            job_dir = paths["jobs"] / job_id
+            atomic_write_json(job_dir / "request.json", {"job_id": job_id, "width": 576, "height": 1024})
+            atomic_write_json(job_dir / "manifest.json", {"local_video_path": str(video),
+                              "output_sha256": hashlib.sha256(b"i2v-video").hexdigest()})
+            update_status(job_dir, "completed", stage="done")
+            with mock.patch.dict(os.environ, {"H3_CANDIDATE_COMFY_URL": "http://100.78.202.37:8189"}, clear=False):
+                queued = h3_queue.enqueue_selected_candidate_upscale(root, set_id, {"source_selected_job_id": job_id})
+                duplicate = h3_queue.enqueue_selected_candidate_upscale(root, set_id, {"source_selected_job_id": job_id})
+            self.assertTrue(duplicate["already_exists"])
+            self.assertEqual({"width": 1080, "height": 1920}, queued["target_resolution"])
+            request = read_json(paths["jobs"] / queued["job_id"] / "request.json")
+            workflow = read_json(paths["jobs"] / queued["job_id"] / "workflow_api.json")
+            self.assertEqual(str(video), request["source_video_path"])
+            self.assertIsNone(request["source_rerender_job_id"])
+            self.assertEqual("selected_i2v", request["upscale_source"])
+            self.assertEqual((1080, 1920), (workflow["2"]["inputs"]["resize_type.width"],
+                                            workflow["2"]["inputs"]["resize_type.height"]))
+
     def test_completed_spark_result_queues_one_windows_h264_upscale_and_worker_runs_it(self):
         class Client:
             def upload_input(self, *, filename, content, subfolder, overwrite=True):
@@ -710,6 +796,9 @@ A restrained low string pulse."""
             def queue_prompt(self, workflow):
                 self.workflow = workflow
                 return {"prompt_id": "upscale-prompt-1"}
+
+            def get_queue(self):
+                return {"queue_running": [], "queue_pending": []}
 
             def get_history(self, prompt_id):
                 return {prompt_id: {"outputs": {}}}
@@ -1375,65 +1464,6 @@ A restrained low string pulse."""
             self.assertFalse(read_json(candidate_path).get("deleted", False))
             self.assertTrue((paths["jobs"] / running_job).is_dir())
 
-    def test_candidate_set_delete_cancels_pending_reviews_and_keeps_completed(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            paths = h3_queue.roots(root)
-            set_id = "set-with-reviews"
-            job_ids = ["job-reviewed", "job-reviewing"]
-            atomic_write_json(
-                paths["candidate_sets"] / set_id / "candidate_set.json",
-                {
-                    "candidate_set_id": set_id,
-                    "candidate_job_ids": job_ids,
-                    "status": "completed",
-                    "render_purpose": "candidate_generation",
-                },
-            )
-            for job_id in job_ids:
-                update_status(paths["jobs"] / job_id, "completed", stage="done")
-            for job_id, review_status in (
-                ("job-reviewed", "completed"),
-                ("job-reviewing", "reviewing"),
-            ):
-                review_dir = (
-                    candidate_review_queue.queue_root(root) / f"review-{job_id}"
-                )
-                atomic_write_json(
-                    review_dir / "request.json",
-                    {
-                        "review_id": review_dir.name,
-                        "review_schema_version": (
-                            candidate_review_queue.REVIEW_SCHEMA_VERSION
-                        ),
-                        "candidate_set_id": set_id,
-                        "generation_job_id": job_id,
-                        "created_at": "2026-08-17T00:00:00+09:00",
-                    },
-                )
-                update_status(review_dir, review_status, stage=review_status)
-
-            deleted = h3_queue.delete_candidate_set(root, set_id)
-
-            cleanup = deleted["review_cleanup"]
-            self.assertEqual(0, cleanup["cancelled_count"])
-            self.assertEqual(1, cleanup["cancel_requested_count"])
-            self.assertEqual(1, cleanup["preserved_completed_count"])
-            self.assertEqual(
-                ["job-reviewed"],
-                [
-                    row["generation_job_id"]
-                    for row in candidate_review_queue.list_reviews(root)
-                ],
-            )
-            active_status = read_json(
-                candidate_review_queue.queue_root(root)
-                / "review-job-reviewing"
-                / "status.json"
-            )
-            self.assertEqual("cancel_requested", active_status["status"])
-            self.assertTrue(active_status["hidden_from_state"])
-
     def test_force_stop_then_soft_delete_hides_set_and_preserves_evidence(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -1497,6 +1527,12 @@ A restrained low string pulse."""
                 root, result["candidate_set_id"]
             )[0]
             self.assertEqual("cancelled", reconciled["status"])
+            with self.assertRaisesRegex(RuntimeError, "선택된 후보"):
+                h3_queue.delete_candidate_set(root, result["candidate_set_id"])
+            cleared = h3_queue.clear_candidate_selection(
+                root, result["candidate_set_id"], completed_job
+            )
+            self.assertTrue(cleared["selection_cleared"])
 
             output = paths["outputs"] / result["candidate_set_id"] / "selected.mp4"
             output.parent.mkdir(parents=True, exist_ok=True)
@@ -2142,7 +2178,7 @@ A restrained low string pulse."""
             self.assertEqual(2, compile_mock.call_count)
             self.assertFalse((root / "runtime/h3/candidate_sets").exists())
 
-    def test_scene_candidate_queue_uses_latest_authored_prompt_for_every_clip(self):
+    def test_scene_candidate_queue_uses_single_project_prompt_for_every_candidate(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             self._write_project(root)
@@ -2197,28 +2233,23 @@ A restrained low string pulse."""
             self.assertEqual(3, result["job_count"])
             self.assertEqual([{
                 "clip_id": "CLIP_002",
-                "source": "latest_authored_revision",
-                "prompt_revision_request_id": "revision_v3",
-                "clip_version": 3,
-                "candidate_round": 3,
-                "variant_ids": ["G", "H", "I"],
-            }], result["prompt_version_sources"])
+                "source": "project_prompt",
+            }], result["prompt_sources"])
             requests = [
                 read_json(root / "runtime/h3/jobs" / job_id / "request.json")
                 for job_id in result["job_ids"]
             ]
             self.assertEqual(
-                ["G", "H", "I"],
-                [row["prompt_variant_id"] for row in requests],
+                [1, 2, 3],
+                [row["candidate_index"] for row in requests],
             )
             self.assertEqual(
-                [
-                    self._full_prompt("new round 3 prompt G"),
-                    self._full_prompt("new round 3 prompt H"),
-                    self._full_prompt("new round 3 prompt I"),
-                ],
+                [self._full_prompt("Dragon action 2")] * 3,
                 [row["prompt"] for row in requests],
             )
+            self.assertTrue(all("clip_version" not in row for row in requests))
+            self.assertTrue(all("candidate_round" not in row for row in requests))
+            self.assertTrue(all("prompt_variant_id" not in row for row in requests))
 
     def test_scene_test_set_dispatch_is_scene_scoped_deduplicated_and_job_free(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -2266,6 +2297,9 @@ A restrained low string pulse."""
 
     def test_h3_worker_records_r2v_benchmark_result(self):
         class Client:
+            def __init__(self):
+                self.history_calls = 0
+
             def health(self):
                 return {}
 
@@ -2275,7 +2309,13 @@ A restrained low string pulse."""
             def queue_prompt(self, workflow):
                 return {"prompt_id": "prompt-1"}
 
+            def get_queue(self):
+                return {"queue_running": [], "queue_pending": []}
+
             def get_history(self, prompt_id):
+                self.history_calls += 1
+                if self.history_calls == 1:
+                    raise h3_worker.requests.ReadTimeout("temporary ComfyUI delay")
                 return {prompt_id: {"outputs": {}}}
 
             def _raise_on_execution_error(self, item):
@@ -2310,13 +2350,42 @@ A restrained low string pulse."""
             queue_dir = paths["test_queues"] / queue_id
             queue_dir.mkdir(parents=True)
             atomic_write_json(queue_dir / "queue.json", {"test_queue_id": queue_id, "status": "queued", "job_ids": [job_id]})
-            with mock.patch.object(h3_worker, "ROOT", root), mock.patch.object(h3_worker, "PATHS", paths), mock.patch.object(h3_worker, "_ensure_client", return_value=Client()), mock.patch.object(h3_worker.benchmark_jobs, "record_result") as record:
+            client = Client()
+            with mock.patch.object(h3_worker, "ROOT", root), mock.patch.object(h3_worker, "PATHS", paths), mock.patch.object(h3_worker, "POLL_SECONDS", 0), mock.patch.object(h3_worker, "_ensure_client", return_value=client), mock.patch.object(h3_worker.benchmark_jobs, "record_result") as record:
                 h3_worker.process_job(job_dir)
             self.assertEqual("completed", read_json(job_dir / "status.json")["status"])
+            self.assertEqual(2, client.history_calls)
             self.assertTrue(Path(read_json(job_dir / "manifest.json")["local_video_path"]).is_file())
             record.assert_called_once()
             self.assertEqual("completed", record.call_args.kwargs["status"])
             self.assertEqual("completed", h3_queue.reconcile_test_queues(root, queue_id)[0]["status"])
+
+    def test_h3_worker_waits_for_existing_comfy_work_before_submission(self):
+        class Client:
+            def __init__(self):
+                self.calls = 0
+
+            def get_queue(self):
+                self.calls += 1
+                if self.calls == 1:
+                    return {"queue_running": [[1, "existing-prompt"]], "queue_pending": [[2, "waiting-prompt"]]}
+                return {"queue_running": [], "queue_pending": []}
+
+        with tempfile.TemporaryDirectory() as temp:
+            job_dir = Path(temp) / "job"
+            update_status(job_dir, "preparing")
+            client = Client()
+            with mock.patch.object(h3_worker, "POLL_SECONDS", 0), mock.patch.object(h3_worker, "STOP_REQUESTED", False), mock.patch.object(h3_worker, "_worker_status"):
+                h3_worker._wait_for_comfy_submission_slot(
+                    job_dir,
+                    client,
+                    label="H3 R2V 생성",
+                )
+            self.assertEqual(2, client.calls)
+            status = read_json(job_dir / "status.json")
+            self.assertEqual("preparing", status["status"])
+            self.assertEqual(1, status["comfy_running_count"])
+            self.assertEqual(1, status["comfy_pending_count"])
 
     def test_force_stop_group_cancels_pending_requests_active_and_preserves_completed(self):
         with tempfile.TemporaryDirectory() as temp:

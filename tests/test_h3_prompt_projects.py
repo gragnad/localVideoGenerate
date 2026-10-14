@@ -41,14 +41,14 @@ class H3PromptProjectTests(unittest.TestCase):
                 "motion_links": ["a-b", "b-c", "c-d"],
                 "environmental_proof": "water and debris preserve force direction",
             },
-            "prompt_variants": [],
+            "video_prompt": "single project prompt",
         }
 
         errors = h3_prompt_projects.action_scene_routing_errors(payload)
 
         self.assertTrue(any("prompt_profile" in error for error in errors))
         self.assertTrue(any("prompt_generator" in error for error in errors))
-        self.assertTrue(any("A/D/E" in error for error in errors))
+        self.assertFalse(any("A/D/E" in error for error in errors))
 
     def test_superseded_project_reports_generation_block_and_replacements(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -143,6 +143,51 @@ class H3PromptProjectTests(unittest.TestCase):
             refreshed = h3_prompt_projects.load_clip(root, "demo", "CLIP_001")
             self.assertNotEqual(first_asset_url, refreshed["references"][0]["asset_url"])
             self.assertEqual(project / "assets" / "hero.png", h3_prompt_projects.picture_path(root, "demo", "CLIP_001", 1))
+
+    def test_project_clips_use_global_sequence_before_scene_id(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            project = root / "prompt_projects" / "ordered_demo"
+            (project / "SCENE_01-COASTAL").mkdir(parents=True)
+            (project / "SCENE_01-1-HIDDEN").mkdir(parents=True)
+            (project / "assets").mkdir()
+            (project / "assets" / "hero.png").write_bytes(b"png")
+            (project / "manifest.json").write_text(json.dumps({
+                "project_kind": "h3_r2v_production", "title": "Ordered Demo",
+            }), encoding="utf-8")
+            rows = [
+                ("SCENE_01-COASTAL", "CLIP_001", 1),
+                ("SCENE_01-1-HIDDEN", "CLIP_002", 2),
+            ]
+            for scene_id, clip_id, sequence in rows:
+                payload = {
+                    "schema_version": 1,
+                    "workflow": "h3_r2v_production",
+                    "prompt_contract_version": "h3_ref_minimal_v1",
+                    "project_id": "ordered_demo",
+                    "scene_id": scene_id,
+                    "clip_id": clip_id,
+                    "sequence": sequence,
+                    "duration_seconds": 5,
+                    "video_prompt": valid_r2v_prompt(),
+                    "references": [{
+                        "picture_index": 1,
+                        "role": "character",
+                        "required": True,
+                        "source_path": "assets/hero.png",
+                    }],
+                }
+                (project / scene_id / f"{clip_id}.md").write_text(
+                    "## Machine Payload\n\n```json\n" + json.dumps(payload) + "\n```\n",
+                    encoding="utf-8",
+                )
+
+            overview = h3_prompt_projects.project_clips(root, "ordered_demo")
+            self.assertEqual(["CLIP_001", "CLIP_002"], [row["clip_id"] for row in overview["clips"]])
+            self.assertEqual(
+                ["SCENE_01-COASTAL", "SCENE_01-1-HIDDEN"],
+                [row["scene_id"] for row in overview["scenes"]],
+            )
 
     def test_i2v_project_normalizes_one_linked_start_image(self):
         with tempfile.TemporaryDirectory() as temp:

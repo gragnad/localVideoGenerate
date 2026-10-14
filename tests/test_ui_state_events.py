@@ -8,15 +8,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class UIStateEventsTest(unittest.TestCase):
-    def test_server_watches_only_h3_and_manual_review_state(self):
+    def test_server_watches_only_h3_state(self):
         server = (ROOT / "web/server.mjs").read_text(encoding="utf-8")
         self.assertIn("text/event-stream", server)
         self.assertIn("state_changed", server)
-        for kind in (
-            "h3_job", "h3_candidate_set", "h3_candidate_review",
-            "h3_test_queue", "model_review_queue",
-        ):
+        for kind in ("h3_job", "h3_candidate_set", "h3_test_queue"):
             self.assertIn(kind, server)
+        for kind in ("h3_candidate_review", "model_review_queue"):
+            self.assertNotIn(kind, server)
         self.assertNotIn("runtime/batches", server)
 
     def test_frontend_uses_one_debounced_h3_state_refresh(self):

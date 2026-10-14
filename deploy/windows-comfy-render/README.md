@@ -1,5 +1,33 @@
 # Windows ComfyUI candidate render target
 
+## Semantic-only Picture references (2026-09-12)
+
+`patch_semantic_references.py` adds the local H3 semantic-only Picture behavior
+to the Windows core node without replacing unrelated node code. It preserves
+all pictures for the text encoder and excludes selected pictures from VAE/DiT
+reference latents. Original files are backed up with their SHA256 suffix.
+
+Copy this script to Windows and use the Python belonging to the active ComfyUI
+installation. First run without `--apply`:
+
+```powershell
+python .\patch_semantic_references.py --comfy-root "C:\Users\gragn\AppData\Local\Comfy-Desktop\ComfyUI-Installs\ComfyUI\ComfyUI"
+```
+
+After a successful dry-run, repeat with `--apply`. It checks the render queue is
+empty before modifying the file. Unexpected upstream code or an existing
+semantic-reference modification causes a refusal instead of an overwrite.
+Do not run generation during installation. Restart only the confirmed idle
+render process and check `/object_info/MiniMaxH3ReferenceToVideo` includes
+`semantic_ref_indexes` in its optional inputs. Do not submit a test generation
+without user approval. To roll back, stop the idle render process, restore the
+exact `.before-semantic-<hash>` backup and restart it.
+
+Status: Linux UI/backend reference propagation and local dry-run tests complete;
+Windows application and live-node verification are pending authenticated access.
+The patch was tested against a reconstructed upstream source structure, not the
+actual Windows source. No model/GPU execution or queue submission was performed.
+
 This installs the existing Windows ComfyUI as the render-only target for the
 video engine. Prompt authoring remains in the video production workflow. The
 Linux H3 worker uploads reference images and the compiled API workflow, waits

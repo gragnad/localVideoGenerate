@@ -371,6 +371,55 @@ def _validate_multi_reference(workflow: dict[str, Any], raw: Any) -> dict[str, A
     }
 
 
+def validate_action_reference(
+    workflow: dict[str, Any], raw: Any
+) -> dict[str, str] | None:
+    """Validate the single motion-only H3 video reference lane."""
+    if raw in (None, ""):
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("액션 비디오 레퍼런스 설정 형식이 올바르지 않습니다.")
+    conditioning_node_id = str(raw.get("conditioning_node_id") or "").strip()
+    conditioning_input = str(
+        raw.get("conditioning_input") or "ref_videos.ref_video_0"
+    ).strip()
+    loader_node_id = str(raw.get("loader_node_id") or "").strip()
+    loader_input = str(raw.get("loader_input") or "video").strip()
+    conditioner = workflow.get(conditioning_node_id)
+    if (
+        not conditioner
+        or str(conditioner.get("class_type") or "")
+        != "MiniMaxH3ReferenceToVideo"
+    ):
+        raise ValueError("액션 비디오용 MiniMax H3 컨디셔닝 노드가 올바르지 않습니다.")
+    loader = workflow.get(loader_node_id)
+    if (
+        not loader
+        or str(loader.get("class_type") or "") != "VHS_LoadVideo"
+        or loader_input not in dict(loader.get("inputs") or {})
+    ):
+        raise ValueError("액션 비디오 업로드 로더가 올바르지 않습니다.")
+    if (loader.get("inputs") or {}).get("force_rate") != 24:
+        raise ValueError("액션 비디오 로더는 24fps IMAGE 프레임을 출력해야 합니다.")
+    if (conditioner.get("inputs") or {}).get(conditioning_input) != [
+        loader_node_id,
+        0,
+    ]:
+        raise ValueError("액션 비디오 IMAGE 출력이 ref_videos.ref_video_0에 연결되지 않았습니다.")
+    if any(
+        str(name).startswith("ref_video_audios.")
+        for name in (conditioner.get("inputs") or {})
+    ):
+        raise ValueError("motion_only 액션 워크플로우에는 비디오 오디오를 연결할 수 없습니다.")
+    return {
+        "conditioning_node_id": conditioning_node_id,
+        "conditioning_input": conditioning_input,
+        "loader_node_id": loader_node_id,
+        "loader_input": loader_input,
+        "reference_role": "motion_only",
+    }
+
+
 def materialize_multi_reference_source(
     compiled: dict[str, Any],
     workflow: dict[str, Any],
@@ -418,6 +467,9 @@ def register_adapter(connection, data: dict[str, Any]) -> dict[str, Any]:
     workflow, _ = load_api_workflow(connection, workflow_profile_id)
     bindings = validate_bindings(workflow, dict(data.get("bindings") or {}))
     multi_reference = _validate_multi_reference(workflow, data.get("multi_reference"))
+    action_reference = validate_action_reference(
+        workflow, data.get("action_reference")
+    )
     adapter_name = str(data.get("adapter_name") or "ComfyUI binding adapter").strip()
     adapter_version = str(data.get("adapter_version") or "1").strip()
     if not adapter_name or not adapter_version:
@@ -428,6 +480,10 @@ def register_adapter(connection, data: dict[str, Any]) -> dict[str, Any]:
     config = {"bindings": bindings, "prompt_template": prompt_template, "defaults": {**DEFAULTS, **dict(data.get("defaults") or {})}}
     if multi_reference:
         config["multi_reference"] = multi_reference
+    if action_reference:
+        if not multi_reference:
+            raise ValueError("액션 참조 어댑터에는 Picture 다중 레퍼런스 설정이 필요합니다.")
+        config["action_reference"] = action_reference
     adapter_id = f"adapter_{_hash_json({'profile': workflow_profile_id, 'name': adapter_name, 'version': adapter_version, 'config': config})[:24]}"
     connection.execute(
         """INSERT OR IGNORE INTO workflow_adapters

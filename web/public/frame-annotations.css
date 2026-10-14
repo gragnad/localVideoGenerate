@@ -1,0 +1,22 @@
+.frame-annotation-dialog{box-sizing:border-box;width:96vw;max-width:1600px;height:94dvh;max-height:96dvh;padding:16px;background:#111923;color:#edf3fa;border:1px solid #465467;border-radius:14px;overscroll-behavior:contain}
+.frame-annotation-dialog[open]{display:flex;flex-direction:column;gap:10px}
+.frame-annotation-dialog::backdrop{background:#000b}
+.frame-annotation-head,.frame-annotation-tools,.frame-annotation-footer{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.frame-annotation-head strong{flex:1;min-width:180px;overflow-wrap:anywhere}
+.frame-annotation-dialog button,.frame-annotation-dialog select{min-height:44px;padding:8px 14px}
+.frame-annotation-tools label{display:flex;align-items:center;gap:6px;font-size:14px}
+.frame-annotation-tools input[type=color]{width:44px;height:44px;padding:2px}
+.frame-annotation-tools input[type=range]{width:100px}
+.frame-annotation-tools input[type=checkbox]{width:20px;height:20px}
+.frame-annotation-stage{position:relative;flex:1;min-height:150px;overflow:hidden;background:#06090d;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;border-radius:8px}
+.frame-annotation-stage canvas{position:absolute;left:50%;top:50%;transform-origin:center;touch-action:none}
+.frame-annotation-footer [data-status]{flex:1;min-width:180px;font-size:14px;overflow-wrap:anywhere}
+.frame-annotation-footer a{color:#a8d9ff}
+.frame-annotation-dialog [hidden]{display:none!important}
+@media(max-width:700px){.frame-annotation-dialog{width:100vw;height:100dvh;max-height:100dvh;max-width:100vw;margin:0;padding:10px;border-radius:0}.frame-annotation-tools{gap:6px}.frame-annotation-dialog button{padding:7px 10px}}
+
+.h3-frame-card-meta{flex-wrap:wrap}
+.h3-frame-card-meta [data-h3-frame-annotate]{width:100%;min-height:44px}
+.frame-annotation-tools label{white-space:nowrap;flex:0 0 auto}
+.frame-annotation-tools select{width:auto}
+.frame-annotation-tools input{flex-shrink:0}

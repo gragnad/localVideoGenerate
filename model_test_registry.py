@@ -29,6 +29,9 @@ H3_I2V_TURBO8_WORKFLOW_FILENAME = (
 H3_I2V_TURBO8_FFLF_WORKFLOW_FILENAME = (
     "(basic)video_minimax_h3_i2v_turbo8step_fflf_api.json"
 )
+H3_R2V_ACTION_WORKFLOW_FILENAME = (
+    "(basic)video_minimax_h3_r2v_int8_turbo_action_ref_api.json"
+)
 TEST_RESOLUTION_PRESETS = (
     (512, 288), (768, 432), (832, 480), (960, 544), (1024, 576),
     (1280, 704), (1280, 736), (1344, 768), (1536, 864),
@@ -809,8 +812,6 @@ def delete_session(root: Path, session_id: str) -> dict[str, Any]:
     session_id = _text(session_id, "테스트 세션 ID", maximum=200)
     active_statuses = {
         "queued", "preparing", "uploading", "submitting", "comfy_queued", "running",
-        "ai_review_queued", "switching_to_qwen_review", "ai_reviewing",
-        "review_cancel_requested",
     }
     root = root.resolve()
     h3_jobs_root = (root / "runtime" / "h3" / "jobs").resolve()
@@ -893,27 +894,11 @@ def delete_session(root: Path, session_id: str) -> dict[str, Any]:
                 "ai_reviewing",
                 "review_cancel_requested",
             }
-            active_review_queue_exists = False
-            for directory in review_queues_root.glob("review_*"):
-                request = read_json(directory / "request.json", {}) or {}
-                if str(request.get("session_id") or "") != session_id:
-                    continue
-                review_status = str(
-                    (read_json(directory / "status.json", {}) or {}).get("status")
-                    or ""
-                )
-                if review_status in {
-                    "queued", "claimed", "preparing", "reviewing",
-                    "cancel_requested",
-                }:
-                    active_review_queue_exists = True
-                    break
             all_generation_terminal = not runs or all(
                 str(run["status"] or "") in terminal_statuses for run in runs
             )
             if (
                 session_status in review_session_statuses
-                and not active_review_queue_exists
                 and all_generation_terminal
             ):
                 session_status = (
@@ -938,11 +923,6 @@ def delete_session(root: Path, session_id: str) -> dict[str, Any]:
                 request = read_json(directory / "request.json", {}) or {}
                 if str(request.get("session_id") or "") != session_id:
                     continue
-                review_status = str(
-                    (read_json(directory / "status.json", {}) or {}).get("status") or ""
-                )
-                if review_status in {"queued", "claimed", "preparing", "reviewing", "cancel_requested"}:
-                    raise RuntimeError("실행 중이거나 큐 대기 중인 AI 검수는 먼저 중단해야 합니다.")
                 review_queue_dirs.add(directory.resolve())
             for run in runs:
                 job_id = str(run.get("job_id") or "").strip()
@@ -1079,6 +1059,44 @@ def _ensure_h3_r2v_adapter(
             "loader_template_node_id": "137",
             "max_slots": 9,
         },
+        {
+            "filename": model_test_r2v.R2V_INT8_TURBO_WORKFLOW_FILENAME,
+            "name": "MiniMax H3 R2V INT8 + Alibaba Turbo",
+            "profile_kind": "optimized_variant",
+            "notes": (
+                "INT8 ConvRot Ref2VA UNet과 Alibaba PDD Acc 8-step을 "
+                "사용하는 기본 H3 R2V 워크플로우"
+            ),
+            "adapter_name": (
+                "MiniMax H3 R2V INT8 + Alibaba Turbo multi-reference"
+            ),
+            "adapter_version": "1",
+            "loader_node_ids": ["137", "139"],
+            "loader_template_node_id": "137",
+            "max_slots": 9,
+        },
+        {
+            "filename": H3_R2V_ACTION_WORKFLOW_FILENAME,
+            "name": "MiniMax H3 R2V INT8 + Alibaba Turbo · Action Reference",
+            "profile_kind": "optimized_variant",
+            "notes": (
+                "기존 INT8 + Alibaba Turbo Picture 입력을 유지하고 24fps 무음 "
+                "motion_only 액션 비디오 한 개를 추가하는 운영 워크플로우"
+            ),
+            "adapter_name": (
+                "MiniMax H3 R2V INT8 + Alibaba Turbo motion-only action reference"
+            ),
+            "adapter_version": "1",
+            "loader_node_ids": ["137", "139"],
+            "loader_template_node_id": "137",
+            "max_slots": 9,
+            "action_reference": {
+                "conditioning_node_id": "136",
+                "conditioning_input": "ref_videos.ref_video_0",
+                "loader_node_id": "167",
+                "loader_input": "video",
+            },
+        },
     )
     available_variants = [
         variant
@@ -1146,6 +1164,11 @@ def _ensure_h3_r2v_adapter(
                     "loader_input": "image",
                     "max_slots": variant["max_slots"],
                 },
+                **(
+                    {"action_reference": variant["action_reference"]}
+                    if variant.get("action_reference")
+                    else {}
+                ),
                 "defaults": {"width": 832, "height": 480, "fps": 24},
             })
     return result

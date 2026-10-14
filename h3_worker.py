@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+import requests
+
 from comfy_client import ComfyClient
 from engine_switch import ensure_comfy_engine
 import benchmark_jobs
@@ -43,12 +45,86 @@ STOP_REQUESTED = False
 REMOTE_RENDER_POWER = RemoteRenderPowerManager(
     RemoteRenderPowerConfig.from_env()
     if WORKER_LANE == "windows_candidate"
-    else None
+    else None,
+    root=ROOT,
 )
 
 
 class H3JobCancelled(RuntimeError):
     pass
+
+
+def _active_tracking_status(job_dir: Path, fallback: str = "comfy_queued") -> str:
+    """Keep a submitted prompt active while ComfyUI is temporarily unresponsive."""
+    value = str((read_json(job_dir / "status.json", {}) or {}).get("status") or "")
+    if value in {"submitted", "comfy_queued", "running"}:
+        return value
+    return fallback
+
+
+def _record_comfy_poll_delay(
+    job_dir: Path,
+    *,
+    label: str,
+    prompt_id: str,
+    elapsed: float,
+    exc: requests.RequestException,
+) -> None:
+    status = _active_tracking_status(job_dir)
+    update_status(
+        job_dir,
+        status,
+        stage=f"{label} ComfyUI 응답 지연 · 같은 작업 재확인",
+        prompt_id=prompt_id,
+        elapsed_seconds=round(elapsed, 1),
+        last_poll_error=f"{type(exc).__name__}: {exc}",
+        last_poll_error_at=now_iso(),
+    )
+    _worker_status("busy", current_job_id=job_dir.name, stage="comfy_poll_retry")
+
+
+def _wait_for_comfy_submission_slot(
+    job_dir: Path,
+    client: ComfyClient,
+    *,
+    label: str,
+) -> None:
+    """Do not add another prompt while the target ComfyUI already has work."""
+    while True:
+        _raise_if_cancel_requested(job_dir, client)
+        if STOP_REQUESTED:
+            raise RuntimeError("H3 Worker 종료 요청으로 작업을 중단했습니다.")
+        try:
+            queue = client.get_queue()
+        except requests.RequestException as exc:
+            update_status(
+                job_dir,
+                "preparing",
+                stage=f"{label} ComfyUI 큐 확인 지연 · 제출 보류",
+                last_poll_error=f"{type(exc).__name__}: {exc}",
+                last_poll_error_at=now_iso(),
+            )
+            _worker_status(
+                "busy", current_job_id=job_dir.name, stage="comfy_queue_check_retry"
+            )
+            time.sleep(POLL_SECONDS)
+            continue
+        running = len(list(queue.get("queue_running") or []))
+        pending = len(list(queue.get("queue_pending") or []))
+        if running + pending == 0:
+            return
+        update_status(
+            job_dir,
+            "preparing",
+            stage=f"{label} ComfyUI 기존 작업 완료 대기",
+            message=f"실행 {running}개 · 대기 {pending}개가 끝날 때까지 새 요청을 보내지 않습니다.",
+            comfy_running_count=running,
+            comfy_pending_count=pending,
+        )
+        _worker_status(
+            "busy", current_job_id=job_dir.name, stage="waiting_for_comfy_slot"
+        )
+        time.sleep(POLL_SECONDS)
 
 
 def _stop(_signum: int, _frame: Any) -> None:
@@ -82,8 +158,33 @@ def _queue_position(queue: dict[str, Any], prompt_id: str) -> tuple[str, int | N
     return "submitted", None
 
 
+WINDOWS_COMFY_URL = "http://100.78.202.37:8189"
+LOCAL_HOSTNAMES = {"", "127.0.0.1", "localhost", "::1"}
+
+
 def _ensure_client(request: dict[str, Any]) -> ComfyClient:
-    comfy_url = str(request.get("comfy_url") or "http://127.0.0.1:8188").rstrip("/")
+    lane = str(request.get("queue_lane") or "").strip()
+    comfy_url = str(request.get("comfy_url") or "").strip().rstrip("/")
+
+    if lane == "windows_candidate":
+        # Windows lane: must resolve to the approved Windows address.
+        if not comfy_url:
+            comfy_url = WINDOWS_COMFY_URL
+        hostname = str(urlparse(comfy_url).hostname or "").lower()
+        if hostname in LOCAL_HOSTNAMES:
+            raise ValueError(
+                f"Windows 후보 작업에 로컬 주소({hostname})가 지정되었습니다. "
+                f"Windows ComfyUI({WINDOWS_COMFY_URL})를 사용하세요."
+            )
+        client = ComfyClient(comfy_url)
+        if REMOTE_RENDER_POWER.manages(comfy_url):
+            REMOTE_RENDER_POWER.ensure_comfy(client)
+        else:
+            client.health()
+        return client
+
+    # Non-Windows lanes keep the previous behaviour.
+    comfy_url = comfy_url or "http://127.0.0.1:8188"
     client = ComfyClient(comfy_url)
     if REMOTE_RENDER_POWER.manages(comfy_url):
         REMOTE_RENDER_POWER.ensure_comfy(client)
@@ -92,7 +193,7 @@ def _ensure_client(request: dict[str, Any]) -> ComfyClient:
         client.health()
     except Exception:
         hostname = str(urlparse(comfy_url).hostname or "").lower()
-        if hostname not in {"", "127.0.0.1", "localhost", "::1"}:
+        if hostname not in LOCAL_HOSTNAMES:
             raise
         ensure_comfy_engine()
         client.health()
@@ -189,6 +290,7 @@ def process_video_upscale(job_dir: Path, request: dict[str, Any]) -> None:
         stage="Windows RTX/RIFE 워크플로우 제출",
         progress=0.18,
     )
+    _wait_for_comfy_submission_slot(job_dir, client, label="Windows 1080p·60fps 업스케일")
     response = client.queue_prompt(workflow)
     prompt_id = str(response["prompt_id"])
     atomic_write_json(job_dir / "queue_response.json", response)
@@ -210,7 +312,18 @@ def process_video_upscale(job_dir: Path, request: dict[str, Any]) -> None:
         elapsed = time.monotonic() - started
         if elapsed > TIMEOUT_SECONDS:
             raise TimeoutError("Windows 업스케일이 제한 시간 안에 완료되지 않았습니다.")
-        history = client.get_history(prompt_id)
+        try:
+            history = client.get_history(prompt_id)
+        except requests.RequestException as exc:
+            _record_comfy_poll_delay(
+                job_dir,
+                label="Windows 1080p·60fps 업스케일",
+                prompt_id=prompt_id,
+                elapsed=elapsed,
+                exc=exc,
+            )
+            time.sleep(POLL_SECONDS)
+            continue
         if prompt_id in history:
             client._raise_on_execution_error(history[prompt_id])
             outputs = client.extract_output_files(history, prompt_id)
@@ -234,8 +347,8 @@ def process_video_upscale(job_dir: Path, request: dict[str, Any]) -> None:
                 output_sha256=output_sha256,
                 generation_seconds=round(elapsed, 3),
                 output_codec="h264",
-                output_width=1920,
-                output_height=1080,
+                output_width=int((request.get("target_resolution") or {}).get("width") or 1920),
+                output_height=int((request.get("target_resolution") or {}).get("height") or 1080),
                 output_fps=60,
                 completed_at=now_iso(),
                 updated_at=now_iso(),
@@ -300,25 +413,39 @@ def process_job(job_dir: Path) -> None:
     client = _ensure_client(request)
     _raise_if_cancel_requested(job_dir, client)
     uploaded = []
-    references = list(request.get("references") or [])
+    references = list(
+        request.get("media_references") or request.get("references") or []
+    )
     patches = list(request.get("reference_patches") or [])
     if len(references) != len(patches):
-        raise ValueError(f"H3 참조 이미지와 {reference_label} 바인딩 개수가 다릅니다.")
+        raise ValueError("H3 미디어 참조와 실행 바인딩 개수가 다릅니다.")
     subfolder = f"h3_jobs/{job_dir.name}"
     for index, (reference, patch) in enumerate(zip(references, patches), start=1):
         _raise_if_cancel_requested(job_dir, client)
+        media_type = str(
+            patch.get("media_type") or reference.get("media_type") or "image"
+        ).lower()
+        if media_type not in {"image", "video"}:
+            raise ValueError("지원하지 않는 H3 미디어 참조 유형입니다.")
+        item_label = "액션 비디오" if media_type == "video" else reference_label
         source = Path(str(reference.get("source_path") or ""))
         if not source.is_file():
-            raise FileNotFoundError(f"{reference_label} {index} 파일을 찾을 수 없습니다.")
+            raise FileNotFoundError(f"{item_label} 파일을 찾을 수 없습니다.")
         content = source.read_bytes()
         if hashlib.sha256(content).hexdigest() != reference.get("sha256"):
-            raise ValueError(f"{reference_label} {index} 파일 해시가 변경되었습니다.")
-        update_status(job_dir, "uploading", stage=f"{label} {reference_label} 업로드 {index}/{len(references)}", progress=0.03 + 0.12 * index / len(references))
-        result = client.upload_image(filename=source.name, content=content, subfolder=subfolder, overwrite=True)
+            raise ValueError(f"{item_label} 파일 해시가 변경되었습니다.")
+        update_status(job_dir, "uploading", stage=f"{label} {item_label} 업로드 {index}/{len(references)}", progress=0.03 + 0.12 * index / len(references))
+        upload = client.upload_input if media_type == "video" else client.upload_image
+        result = upload(
+            filename=source.name,
+            content=content,
+            subfolder=subfolder,
+            overwrite=True,
+        )
         node = workflow.get(str(patch.get("node_id") or ""))
         input_name = str(patch.get("input") or "")
         if not node or input_name not in dict(node.get("inputs") or {}):
-            raise ValueError(f"{reference_label} {index} 실행 바인딩이 유효하지 않습니다.")
+            raise ValueError(f"{item_label} 실행 바인딩이 유효하지 않습니다.")
         value = "/".join(part.strip("/") for part in (result.get("subfolder"), result.get("name")) if str(part or "").strip("/"))
         node["inputs"][input_name] = value
         uploaded.append({**reference, "comfy_response": result})
@@ -328,6 +455,7 @@ def process_job(job_dir: Path) -> None:
     atomic_write_json(job_dir / "manifest.json", manifest)
     _raise_if_cancel_requested(job_dir, client)
     update_status(job_dir, "submitting", stage=f"{label} ComfyUI 큐 제출", progress=0.18)
+    _wait_for_comfy_submission_slot(job_dir, client, label=label)
     response = client.queue_prompt(workflow)
     prompt_id = str(response["prompt_id"])
     atomic_write_json(job_dir / "queue_response.json", response)
@@ -343,7 +471,18 @@ def process_job(job_dir: Path) -> None:
         elapsed = time.monotonic() - started
         if elapsed > TIMEOUT_SECONDS:
             raise TimeoutError("H3 생성이 제한 시간 안에 완료되지 않았습니다.")
-        history = client.get_history(prompt_id)
+        try:
+            history = client.get_history(prompt_id)
+        except requests.RequestException as exc:
+            _record_comfy_poll_delay(
+                job_dir,
+                label=label,
+                prompt_id=prompt_id,
+                elapsed=elapsed,
+                exc=exc,
+            )
+            time.sleep(POLL_SECONDS)
+            continue
         if prompt_id in history:
             client._raise_on_execution_error(history[prompt_id])
             outputs = client.extract_output_files(history, prompt_id)
@@ -399,7 +538,7 @@ def main() -> None:
         )
         if job_dir is None:
             stage = (
-                "AI 검수 완료 후 H3 큐 재개"
+                "외부 Qwen 엔진 사용 종료 후 H3 큐 재개"
                 if blocked_by == "review"
                 else f"{WORKER_LABEL} 큐 대기"
             )

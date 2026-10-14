@@ -37,13 +37,13 @@ docker create \
     --tp-size 1 \
     --context-length "$QWEN38_CONTEXT_LENGTH" \
     --mem-fraction-static "$QWEN38_MEM_FRACTION" \
-    --max-running-requests 1 \
+    --max-running-requests "${QWEN38_MAX_RUNNING_REQUESTS:-2}" \
     --chunked-prefill-size 8192 \
     --attention-backend flashinfer \
     --mm-feature-transport cpu \
     --disable-prefill-cuda-graph \
-    --disable-radix-cache \
     --reasoning-parser qwen3 \
+    --tool-call-parser qwen3_coder \
     --trust-remote-code
 
 docker inspect "$QWEN38_CONTAINER" \

@@ -173,6 +173,32 @@ class H3PromptContractTest(unittest.TestCase):
         prompt = contract.render_prompt(spec)
         self.assertTrue(contract.validate_prompt(prompt, duration_seconds=6.5).valid)
 
+    def test_allows_six_storyboard_shots_in_fifteen_seconds_when_explicit(self):
+        spec = valid_spec()
+        spec["duration_seconds"] = 15
+        spec["allow_six_shots"] = True
+        spec["shots"] = []
+        for number in range(1, 7):
+            row = {
+                "number": number,
+                "description": f"<Subject 1> Lua continues chronological action {number}.",
+            }
+            if number > 1:
+                row["start_seconds"] = (number - 1) * 2.5
+            spec["shots"].append(row)
+        spec["retention_analysis"][0]["shots"] = list(range(1, 7))
+
+        prompt = contract.render_prompt(spec)
+        allowed = contract.validate_prompt(
+            prompt,
+            duration_seconds=15,
+            allow_six_shots=True,
+        )
+        rejected = contract.validate_prompt(prompt, duration_seconds=15)
+
+        self.assertTrue(allowed.valid, allowed.as_dict())
+        self.assertIn("shot_budget", {issue.code for issue in rejected.errors})
+
     def test_storyboard_picture_is_independent_from_subject_numbering(self):
         spec = valid_spec()
         spec["duration_seconds"] = 8

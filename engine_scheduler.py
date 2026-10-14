@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-"""Coordinate exclusive H3 generation and model-test review engine use."""
+"""Coordinate local H3 generation with external clients that lease the shared vLLM engine."""
 
 import json
 import os
+import uuid
 from pathlib import Path
 from typing import Any, Literal
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from job_queue import claim_next_queued_job, queue_claim_lock, read_json
+from job_queue import atomic_write_json, claim_next_queued_job, now_iso, queue_claim_lock, read_json
 
 
 H3_PENDING_STATUSES = {
@@ -23,13 +24,73 @@ H3_PENDING_STATUSES = {
     "comfy_queued",
     "running",
 }
-REVIEW_ACTIVE_STATUSES = {
-    "claimed",
-    "preparing",
-    "reviewing",
-    "cancel_requested",
-}
 GenerationLane = Literal["windows_candidate", "local_generation"]
+
+
+def _external_review_lease_path(root: Path) -> Path:
+    return root / "runtime/engine_scheduler/external_review_lease.json"
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def external_review_active(root: Path) -> bool:
+    """True while an out-of-queue client, such as Scene Director, owns vLLM."""
+    lease_path = _external_review_lease_path(root)
+    lease = read_json(lease_path, {}) or {}
+    if not lease:
+        return False
+    if _pid_alive(int(lease.get("pid") or 0)):
+        return True
+    try:
+        lease_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return False
+
+
+def claim_external_review(
+    root: Path,
+    worker_pid: int,
+    owner: str,
+) -> tuple[str | None, Literal["generation", "review"] | None]:
+    """Reserve the shared local inference engine for an external review client."""
+    scheduler_root = root / "runtime/engine_scheduler"
+    scheduler_root.mkdir(parents=True, exist_ok=True)
+    with queue_claim_lock(scheduler_root):
+        if h3_generation_pending(root) or comfy_work_active():
+            return None, "generation"
+        if external_review_active(root):
+            return None, "review"
+        lease_id = uuid.uuid4().hex
+        atomic_write_json(
+            _external_review_lease_path(root),
+            {
+                "lease_id": lease_id,
+                "pid": int(worker_pid),
+                "owner": owner,
+                "claimed_at": now_iso(),
+            },
+        )
+        return lease_id, None
+
+
+def release_external_review(root: Path, lease_id: str) -> None:
+    scheduler_root = root / "runtime/engine_scheduler"
+    with queue_claim_lock(scheduler_root):
+        lease_path = _external_review_lease_path(root)
+        lease = read_json(lease_path, {}) or {}
+        if lease.get("lease_id") == lease_id:
+            lease_path.unlink(missing_ok=True)
 
 
 def generation_lane(request: dict[str, Any]) -> GenerationLane:
@@ -77,13 +138,7 @@ def h3_generation_pending(
 
 
 def model_review_active(root: Path) -> bool:
-    return _has_status(
-        root / "runtime/model_test_review_queue",
-        REVIEW_ACTIVE_STATUSES,
-    ) or _has_status(
-        root / "runtime/h3/candidate_review_queue",
-        REVIEW_ACTIVE_STATUSES,
-    )
+    return external_review_active(root)
 
 
 def comfy_work_active(comfy_url: str | None = None) -> bool:
@@ -109,7 +164,7 @@ def claim_generation(
     worker_pid: int,
     lane: GenerationLane = "local_generation",
 ) -> tuple[Path | None, Literal["review"] | None]:
-    """Claim one lane; only local generation shares its engine with review."""
+    """Claim one lane; only local generation shares its engine with external vLLM clients."""
     if lane not in {"windows_candidate", "local_generation"}:
         raise ValueError(f"지원하지 않는 생성 큐 레인입니다: {lane}")
     scheduler_root = root / "runtime/engine_scheduler"
@@ -121,30 +176,6 @@ def claim_generation(
                 root / "runtime/h3/jobs",
                 worker_pid,
                 request_filter=lambda request: generation_lane(request) == lane,
-            ),
-            None,
-        )
-
-
-def claim_review(
-    root: Path,
-    worker_pid: int,
-) -> tuple[Path | None, Literal["generation"] | None]:
-    """Claim local review without waiting for independent Windows candidates."""
-    scheduler_root = root / "runtime/engine_scheduler"
-    with queue_claim_lock(scheduler_root):
-        if h3_generation_pending(root) or comfy_work_active():
-            return None, "generation"
-        candidate = claim_next_queued_job(
-            root / "runtime/h3/candidate_review_queue",
-            worker_pid,
-        )
-        if candidate is not None:
-            return candidate, None
-        return (
-            claim_next_queued_job(
-                root / "runtime/model_test_review_queue",
-                worker_pid,
             ),
             None,
         )

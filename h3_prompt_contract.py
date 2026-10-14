@@ -25,12 +25,23 @@ GRID_STORYBOARD_CONTRACT_VERSION = "h3_ref_storyboard_v2"
 GRID_FREE_STORYBOARD_CONTRACT_VERSION = "h3_ref_storyboard_v3"
 CONTRACT_VERSION = "h3_ref_storyboard_v4"
 PASSTHROUGH_CONTRACT_VERSION = "h3_user_supplied_passthrough_v1"
+PASSTHROUGH_CONTRACT_VERSION_V2 = "h3_user_supplied_passthrough_v2"
+PASSTHROUGH_CONTRACT_VERSION_V3 = "h3_user_supplied_passthrough_v3"
+PASSTHROUGH_CONTRACT_VERSION_V4 = "h3_user_supplied_passthrough_v4"
+PASSTHROUGH_CONTRACT_VERSION_V5 = "h3_user_supplied_passthrough_v5"
+PASSTHROUGH_CONTRACT_VERSIONS = frozenset({
+    PASSTHROUGH_CONTRACT_VERSION,
+    PASSTHROUGH_CONTRACT_VERSION_V2,
+    PASSTHROUGH_CONTRACT_VERSION_V3,
+    PASSTHROUGH_CONTRACT_VERSION_V4,
+    PASSTHROUGH_CONTRACT_VERSION_V5,
+})
 SUPPORTED_CONTRACT_VERSIONS = frozenset({
     LEGACY_CONTRACT_VERSION,
     GRID_STORYBOARD_CONTRACT_VERSION,
     GRID_FREE_STORYBOARD_CONTRACT_VERSION,
     CONTRACT_VERSION,
-    PASSTHROUGH_CONTRACT_VERSION,
+    *PASSTHROUGH_CONTRACT_VERSIONS,
 })
 RETENTION_MARKERS = {
     "fully_preserved",
@@ -245,6 +256,7 @@ def validate_prompt(
     duration_seconds: float | None = None,
     require_shot_timestamps: bool = True,
     allow_four_shots: bool = False,
+    allow_six_shots: bool = False,
 ) -> ValidationReport:
     prompt = str(prompt or "").strip()
     errors: list[ValidationIssue] = []
@@ -420,6 +432,8 @@ def validate_prompt(
             budget = max(budget, 3)
         if allow_four_shots:
             budget = max(budget, 4)
+        if allow_six_shots:
+            budget = max(budget, 6)
         if len(shot_rows) > budget:
             _issue(
                 errors,
@@ -455,12 +469,14 @@ def assert_valid_prompt(
     duration_seconds: float | None = None,
     require_shot_timestamps: bool = True,
     allow_four_shots: bool = False,
+    allow_six_shots: bool = False,
 ) -> str:
     report = validate_prompt(
         prompt,
         duration_seconds=duration_seconds,
         require_shot_timestamps=require_shot_timestamps,
         allow_four_shots=allow_four_shots,
+        allow_six_shots=allow_six_shots,
     )
     if not report.valid:
         raise PromptContractError(report)
@@ -628,4 +644,5 @@ def render_prompt(spec: dict[str, Any]) -> str:
         duration_seconds=duration,
         require_shot_timestamps=not allow_untimed_shots,
         allow_four_shots=bool(spec.get("allow_four_shots")),
+        allow_six_shots=bool(spec.get("allow_six_shots")),
     )

@@ -4,7 +4,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/p
 import { Readable } from 'node:stream';
 import { extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
@@ -14,11 +14,11 @@ const PUBLIC = join(import.meta.dirname, 'public');
 const H3_ROOT = join(ROOT, 'runtime/h3');
 const H3_JOBS = join(H3_ROOT, 'jobs');
 const H3_CANDIDATE_SETS = join(H3_ROOT, 'candidate_sets');
-const H3_CANDIDATE_REVIEW_QUEUE = join(H3_ROOT, 'candidate_review_queue');
 const H3_PROJECT_TEST_SETS = join(H3_ROOT, 'project_test_sets');
 const H3_TEST_QUEUES = join(H3_ROOT, 'test_queues');
 const H3_THUMBNAIL_CACHE = join(H3_ROOT, 'thumbnail_cache');
-const MODEL_REVIEW_QUEUE = join(ROOT, 'runtime/model_test_review_queue');
+const H3_FRAME_EXPORTS = join(H3_ROOT, 'frame_exports');
+const H3_FRAME_EXPORT_TAGS = new Set(['0p25s', '0p5s', '1s']);
 const ARCHIVED_JOBS = join(ROOT, 'jobs'); // read-only playback for archived benchmark history
 const TMP = join(ROOT, 'runtime/ui-uploads');
 const COMFY_OUTPUT = resolve(
@@ -55,9 +55,14 @@ function json(res, statusCode, payload) {
   res.end(body);
 }
 
-async function bodyJson(req) {
+async function bodyJson(req, limit = Infinity) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) throw new Error("요청 데이터 크기 제한을 초과했습니다.");
+    chunks.push(chunk);
+  }
   return JSON.parse(Buffer.concat(chunks).toString() || '{}');
 }
 
@@ -87,23 +92,44 @@ function safeId(value, label = 'ID') {
 
 async function python(action, payload) {
   return new Promise((resolveCall, reject) => {
-    const child = execFile(
+    const child = spawn(
       PYTHON,
       [BACKEND, action],
       {
         env: { ...process.env, VIDEO_ENGINE_ROOT: ROOT, PYTHONPATH: ROOT },
-        maxBuffer: 16 * 1024 * 1024,
-      },
-      (error, stdout, stderr) => {
-        if (error) return reject(new Error(stderr || error.message));
-        try {
-          resolveCall(JSON.parse(stdout));
-        } catch (parseError) {
-          reject(parseError);
-        }
+        stdio: ['pipe', 'pipe', 'pipe'],
       },
     );
-    child.stdin.end(JSON.stringify(payload));
+    const stdout = [];
+    const stderr = [];
+    let settled = false;
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+    child.stdout.on('data', (chunk) => stdout.push(chunk));
+    child.stderr.on('data', (chunk) => stderr.push(chunk));
+    child.on('error', fail);
+    child.on('close', (code, signal) => {
+      if (settled) return;
+      const errorText = Buffer.concat(stderr).toString('utf8').trim();
+      if (code !== 0) {
+        fail(new Error(errorText || `Python bridge exited with code ${code ?? signal}`));
+        return;
+      }
+      try {
+        const value = JSON.parse(Buffer.concat(stdout).toString('utf8'));
+        settled = true;
+        resolveCall(value);
+      } catch (parseError) {
+        fail(parseError);
+      }
+    });
+    child.stdin.on('error', (error) => {
+      if (error.code !== 'EPIPE') fail(error);
+    });
+    child.stdin.end(JSON.stringify(payload ?? {}));
   });
 }
 
@@ -125,6 +151,7 @@ const MIME_TYPES = {
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
+  '.zip': 'application/zip',
 };
 
 async function stream(path, req, res, { staticFile = false, cacheSeconds = null } = {}) {
@@ -299,7 +326,16 @@ async function resolveJobVideoPath(jobId) {
   return null;
 }
 
-async function serveVideoThumbnailPath(video, cacheId, req, res) {
+let actionThumbnailActive = 0;
+const actionThumbnailWaiters = [];
+async function withActionThumbnailSlot(task) {
+  if (actionThumbnailActive >= 2) await new Promise(resolve => actionThumbnailWaiters.push(resolve));
+  else actionThumbnailActive++;
+  try { return await task(); }
+  finally { const next = actionThumbnailWaiters.shift(); if (next) next(); else actionThumbnailActive--; }
+}
+
+async function serveVideoThumbnailPath(video, cacheId, req, res, width = 960) {
   const id = safeId(cacheId, '썸네일 캐시 ID');
   let videoInfo;
   try {
@@ -322,7 +358,7 @@ async function serveVideoThumbnailPath(video, cacheId, req, res) {
         'ffmpeg',
         [
           '-hide_banner', '-loglevel', 'error', '-y', '-ss', '0.1', '-i', video,
-          '-frames:v', '1', '-vf', 'scale=960:-2:force_original_aspect_ratio=decrease',
+          '-frames:v', '1', '-vf', `scale=${width}:-2:force_original_aspect_ratio=decrease`,
           '-q:v', '3', temporary,
         ],
         { timeout: 30000, maxBuffer: 2 * 1024 * 1024 },
@@ -352,6 +388,32 @@ async function serveVideoThumbnail(jobId, req, res) {
   return serveVideoThumbnailPath(video, safeId(jobId, '작업 ID'), req, res);
 }
 
+async function serveH3FrameExportFile(jobId, tag, filename, download, req, res) {
+  const id = safeId(jobId, 'H3 작업 ID');
+  if (!H3_FRAME_EXPORT_TAGS.has(tag) || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(filename)) {
+    return json(res, 404, { error: '추출된 프레임 파일을 찾을 수 없습니다.' });
+  }
+  const directory = join(H3_FRAME_EXPORTS, id, tag);
+  const manifest = await readJson(join(directory, 'frames.json'), {});
+  const allowed = new Set([
+    manifest.zip_filename,
+    manifest.labeled_zip_filename,
+    ...(manifest.selection_zips || []),
+    ...(manifest.frames || []).flatMap(frame => [
+      frame.filename,
+      frame.labeled_filename,
+      frame.preview_filename,
+    ]),
+  ]);
+  if (!allowed.has(filename)) {
+    return json(res, 404, { error: '추출된 프레임 파일을 찾을 수 없습니다.' });
+  }
+  if (download) {
+    res.setHeader('content-disposition', `attachment; filename="${filename}"`);
+  }
+  return stream(join(directory, filename), req, res, { cacheSeconds: 300 });
+}
+
 async function serveH3VideoThumbnail(jobId, req, res) {
   const id = safeId(jobId, 'H3 작업 ID');
   const status = await readJson(join(H3_JOBS, id, 'status.json'), {});
@@ -372,10 +434,8 @@ const eventClients = new Set();
 const watchConfigs = [
   { kind: 'h3_job', root: H3_JOBS, file: 'status.json' },
   { kind: 'h3_candidate_set', root: H3_CANDIDATE_SETS, file: 'candidate_set.json' },
-  { kind: 'h3_candidate_review', root: H3_CANDIDATE_REVIEW_QUEUE, file: 'status.json' },
   { kind: 'h3_project_test_set', root: H3_PROJECT_TEST_SETS, file: 'project_test_set.json' },
   { kind: 'h3_test_queue', root: H3_TEST_QUEUES, file: 'queue.json' },
-  { kind: 'model_review_queue', root: MODEL_REVIEW_QUEUE, file: 'status.json' },
 ];
 
 function publishStateEvent(payload) {
@@ -459,7 +519,6 @@ async function route(req, res) {
         join(H3_ROOT, 'windows_candidate_worker_status.json'),
         {},
       ),
-      review_worker: await readJson(join(ROOT, 'runtime/model_test_review_worker_status.json'), {}),
       comfyui: await serviceReady(`${process.env.COMFY_URL || 'http://127.0.0.1:8188'}/system_stats`),
       vllm: await serviceReady(`${process.env.VLLM_URL || 'http://127.0.0.1:8091'}/v1/models`),
     });
@@ -470,12 +529,40 @@ async function route(req, res) {
   if (req.method === 'GET' && url.pathname === '/api/windows-render-status') {
     return json(res, 200, await windowsRenderStatus());
   }
+  if (req.method === 'GET' && url.pathname === '/api/windows-power-policy') {
+    return json(res, 200, await python('get_windows_power_policy', {}));
+  }
+  if (req.method === 'POST' && url.pathname === '/api/windows-power-policy') {
+    return json(res, 200, await python('set_windows_power_policy', await bodyJson(req)));
+  }
+  if (req.method === 'POST' && url.pathname === '/api/windows-render-power') {
+    return json(res, 202, await python(
+      'control_windows_render_power',
+      await bodyJson(req),
+    ));
+  }
 
   if (req.method === 'GET' && url.pathname === '/api/h3/config') {
     return json(res, 200, await python('h3_config', {}));
   }
   if (req.method === 'GET' && url.pathname === '/api/h3/state') {
     return json(res, 200, await python('h3_state', {}));
+  }
+  if (req.method === 'GET' && url.pathname === '/api/h3/candidate-page') {
+    return json(res, 200, await python('h3_candidate_page', {
+      project_id: url.searchParams.get('project_id') || '',
+      scene_id: url.searchParams.get('scene_id') || '',
+      page: Number(url.searchParams.get('page') || 1),
+      page_size: Number(url.searchParams.get('page_size') || 10),
+    }));
+  }
+  if (req.method === 'GET' && url.pathname === '/api/h3/results-page') {
+    return json(res, 200, await python('h3_results_page', {
+      project_id: url.searchParams.get('project_id') || '',
+      scene_id: url.searchParams.get('scene_id') || '',
+      page: Number(url.searchParams.get('page') || 1),
+      page_size: Number(url.searchParams.get('page_size') || 10),
+    }));
   }
   if (req.method === 'GET' && url.pathname === '/api/h3/projects') {
     return json(res, 200, await python('h3_projects', {}));
@@ -509,6 +596,20 @@ async function route(req, res) {
         project_id: decodeURIComponent(projectPicture[1]),
         clip_id: decodeURIComponent(projectPicture[2]),
         picture_index: Number(projectPicture[3]),
+      });
+      return stream(output.path, req, res, { cacheSeconds: 3600 });
+    } catch (error) {
+      return json(res, 404, { error: error.message });
+    }
+  }
+  const candidateReference = url.pathname.match(
+    /^\/api\/h3\/candidate-sets\/([^/]+)\/references\/(\d+)$/,
+  );
+  if (req.method === 'GET' && candidateReference) {
+    try {
+      const output = await python('h3_candidate_reference', {
+        candidate_set_id: decodeURIComponent(candidateReference[1]),
+        picture_index: Number(candidateReference[2]),
       });
       return stream(output.path, req, res, { cacheSeconds: 3600 });
     } catch (error) {
@@ -566,12 +667,6 @@ async function route(req, res) {
       await rm(folder, { recursive: true, force: true });
     }
   }
-  if (req.method === 'PUT' && url.pathname === '/api/h3/candidate-ai-review') {
-    return json(res, 200, await python(
-      'set_h3_candidate_ai_review',
-      await bodyJson(req),
-    ));
-  }
   const candidateSet = url.pathname.match(
     /^\/api\/h3\/candidate-sets\/([^/]+)$/,
   );
@@ -587,32 +682,6 @@ async function route(req, res) {
   if (req.method === 'POST' && candidateRequeue) {
     return json(res, 201, await python('requeue_h3_candidate_set', {
       candidate_set_id: decodeURIComponent(candidateRequeue[1]),
-    }));
-  }
-  const candidateRevision = url.pathname.match(
-    /^\/api\/h3\/candidate-sets\/([^/]+)\/(?:revision-requests|revisions)$/,
-  );
-  if (req.method === 'POST' && candidateRevision) {
-    return json(res, 201, await python('save_h3_prompt_revision_request', {
-      candidate_set_id: decodeURIComponent(candidateRevision[1]),
-      ...(await bodyJson(req)),
-    }));
-  }
-  const promptRevisionApply = url.pathname.match(
-    /^\/api\/h3\/prompt-revision-requests\/([^/]+)\/apply$/,
-  );
-  if (req.method === 'POST' && promptRevisionApply) {
-    return json(res, 201, await python('apply_h3_prompt_revision', {
-      prompt_revision_request_id: decodeURIComponent(promptRevisionApply[1]),
-      ...(await bodyJson(req)),
-    }));
-  }
-  const candidateRestore = url.pathname.match(
-    /^\/api\/h3\/candidate-sets\/([^/]+)\/restore$/,
-  );
-  if (req.method === 'POST' && candidateRestore) {
-    return json(res, 201, await python('restore_h3_candidate_version', {
-      candidate_set_id: decodeURIComponent(candidateRestore[1]),
     }));
   }
   const candidateSelect = url.pathname.match(
@@ -665,6 +734,59 @@ async function route(req, res) {
   if (req.method === 'GET' && h3VideoThumbnail) {
     return serveH3VideoThumbnail(decodeURIComponent(h3VideoThumbnail[1]), req, res);
   }
+  const h3FrameExport = url.pathname.match(/^\/api\/h3\/jobs\/([^/]+)\/frames$/);
+  if (req.method === 'POST' && h3FrameExport) {
+    const data = await bodyJson(req);
+    return json(res, 200, await python('h3_frame_export', {
+      job_id: decodeURIComponent(h3FrameExport[1]),
+      interval: data.interval,
+    }));
+  }
+  const h3FrameSelection = url.pathname.match(
+    /^\/api\/h3\/jobs\/([^/]+)\/frames\/([^/]+)\/selection-zip$/,
+  );
+  if (req.method === 'POST' && h3FrameSelection) {
+    const data = await bodyJson(req);
+    return json(res, 200, await python('h3_frame_selection_zip', {
+      job_id: decodeURIComponent(h3FrameSelection[1]),
+      tag: decodeURIComponent(h3FrameSelection[2]),
+      filenames: data.filenames,
+      labeled: data.labeled === true,
+    }));
+  }
+  const annotationList = url.pathname.match(/^\/api\/h3\/jobs\/([^/]+)\/frames\/([^/]+)\/annotations$/);
+  if (req.method === 'GET' && annotationList) {
+    return json(res, 200, await python('h3_frame_annotation_list', {job_id: decodeURIComponent(annotationList[1]), tag: decodeURIComponent(annotationList[2])}));
+  }
+  const annotation = url.pathname.match(
+    /^\/api\/h3\/jobs\/([^/]+)\/frames\/([^/]+)\/([^/]+)\/annotation(\/image)?$/,
+  );
+  if (annotation && ['GET', 'PUT'].includes(req.method)) {
+    const data = {job_id: decodeURIComponent(annotation[1]), tag: decodeURIComponent(annotation[2]), filename: decodeURIComponent(annotation[3])};
+    if (annotation[4] && req.method === 'GET') {
+      const out = await python('h3_frame_annotation_image', {...data, revision: url.searchParams.get('revision')});
+      return stream(out.path, req, res);
+    }
+    if (!annotation[4] && req.method === 'GET') return json(res, 200, await python('h3_frame_annotation_load', data));
+    if (!annotation[4] && req.method === 'PUT') {
+      const body = await bodyJson(req, 8 * 1024 * 1024);
+      const out = await python('h3_frame_annotation_save', {...data, strokes: body.strokes, expected_revision: body.expected_revision});
+      return json(res, out.conflict ? 409 : 200, out);
+    }
+  }
+  const h3FrameFile = url.pathname.match(
+    /^\/api\/h3\/jobs\/([^/]+)\/frames\/([^/]+)\/([^/]+)$/,
+  );
+  if (req.method === 'GET' && h3FrameFile) {
+    return serveH3FrameExportFile(
+      decodeURIComponent(h3FrameFile[1]),
+      decodeURIComponent(h3FrameFile[2]),
+      decodeURIComponent(h3FrameFile[3]),
+      url.searchParams.get('download') === '1',
+      req,
+      res,
+    );
+  }
   const h3Video = url.pathname.match(/^\/api\/h3\/jobs\/([^/]+)\/video$/);
   if (req.method === 'GET' && h3Video) {
     try {
@@ -673,6 +795,71 @@ async function route(req, res) {
     } catch (error) {
       return json(res, 404, { error: error.message });
     }
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/h3/action-assets') {
+    return json(res, 200, await python('h3_action_assets', {}));
+  }
+  if (req.method === 'POST' && url.pathname === '/api/h3/action-assets') {
+    const form = await formData(req);
+    const data = JSON.parse(String(form.get('data') || '{}'));
+    const folder = join(TMP, randomUUID());
+    await mkdir(folder, { recursive: true });
+    try {
+      const file = form.get('video');
+      if (!file || typeof file.arrayBuffer !== 'function') {
+        throw new Error('등록할 액션 영상 파일이 필요합니다.');
+      }
+      data.upload_path = await saveUpload(file, folder);
+      data.original_name = file.name || 'action-video.mp4';
+      return json(res, 201, await python('register_h3_action_asset', data));
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/h3/action-assets/from-rerender') {
+    return json(res, 201, await python(
+      'register_h3_rerender_action_asset',
+      await bodyJson(req),
+    ));
+  }
+  const actionAssetThumbnail = url.pathname.match(/^\/api\/h3\/action-assets\/([^/]+)\/thumbnail$/);
+  if (req.method === 'GET' && actionAssetThumbnail) {
+    return withActionThumbnailSlot(async () => {
+      try {
+        const id = decodeURIComponent(actionAssetThumbnail[1]);
+        const output = await python('h3_action_asset_media', { action_asset_id: id, kind: 'h3' });
+        return await serveVideoThumbnailPath(output.path, `action-480-${id}`, req, res, 480);
+      } catch (error) {
+        return json(res, 404, { error: error.message });
+      }
+    });
+  }
+  const actionAssetMedia = url.pathname.match(
+    /^\/api\/h3\/action-assets\/([^/]+)\/video$/,
+  );
+  if (req.method === 'GET' && actionAssetMedia) {
+    try {
+      const output = await python('h3_action_asset_media', {
+        action_asset_id: decodeURIComponent(actionAssetMedia[1]),
+        kind: url.searchParams.get('kind') || 'h3',
+      });
+      return stream(output.path, req, res);
+    } catch (error) {
+      return json(res, 404, { error: error.message });
+    }
+  }
+  const actionAsset = url.pathname.match(/^\/api\/h3\/action-assets\/([^/]+)$/);
+  if (req.method === 'DELETE' && actionAsset) {
+    return json(res, 200, await python('delete_h3_action_asset', {
+      action_asset_id: decodeURIComponent(actionAsset[1]),
+    }));
+  }
+  if (req.method === 'PATCH' && actionAsset) {
+    return json(res, 200, await python('update_h3_action_asset', {
+      action_asset_id: decodeURIComponent(actionAsset[1]),
+      ...(await bodyJson(req)),
+    }));
   }
 
   if (req.method === 'GET' && url.pathname === '/api/model-tests') {
@@ -773,19 +960,6 @@ async function route(req, res) {
   if (req.method === 'POST' && sessionQueue) {
     return json(res, 201, await python('queue_model_test_session', {
       session_id: decodeURIComponent(sessionQueue[1]),
-    }));
-  }
-  const aiReview = url.pathname.match(
-    /^\/api\/model-tests\/sessions\/([^/]+)\/ai-review$/,
-  );
-  if (req.method === 'POST' && aiReview) {
-    return json(res, 201, await python('queue_model_test_ai_review', {
-      session_id: decodeURIComponent(aiReview[1]),
-    }));
-  }
-  if (req.method === 'DELETE' && aiReview) {
-    return json(res, 200, await python('cancel_model_test_ai_review', {
-      session_id: decodeURIComponent(aiReview[1]),
     }));
   }
   const sessionResults = url.pathname.match(
