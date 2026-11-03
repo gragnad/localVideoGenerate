@@ -11,11 +11,16 @@
   const copy = value => JSON.parse(JSON.stringify(value));
   const status = value => { q('[data-status]').textContent = value; };
   const endpoint = (s, frame) => `/api/h3/jobs/${encodeURIComponent(s.jobId)}/frames/${encodeURIComponent(s.tag)}/${encodeURIComponent(frame.filename)}/annotation`;
-  async function request(url, options) {
+  async function requestRaw(url, options) {
     const response = await fetch(url, {cache: 'no-store', ...options});
     const body = await response.json();
     if (!response.ok) throw Error(body.error || '서버 요청 실패');
     return body;
+  }
+  function request(url, options) {
+    return window.h3InteractionFeedback
+      ? window.h3InteractionFeedback.track(() => requestRaw(url, options))
+      : requestRaw(url, options);
   }
   function controls() {
     q('[data-prev]').disabled = busy || !session || session.index === 0;

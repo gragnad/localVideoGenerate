@@ -486,8 +486,8 @@ class UIContractTest(unittest.TestCase):
         ):
             self.assertIn(marker, self.index)
         self.assertIn('전체 프로젝트', self.index)
-        self.assertNotIn('h3CandidateEpisodeFilter', self.index)
-        self.assertNotIn('h3ResultEpisodeFilter', self.index)
+        self.assertIn('h3CandidateEpisodeFilter', self.index)
+        self.assertIn('h3ResultEpisodeFilter', self.index)
         self.assertIn("function h3SourceMetadata(set)", self.app)
         source_filters = self.app.split(
             "const h3SourceFilterConfig=", 1
@@ -719,7 +719,7 @@ class UIContractTest(unittest.TestCase):
         self.assertIn('{width:1024,height:576}', self.app)
         self.assertIn('{width:1280,height:736}', self.app)
         self.assertIn(
-            "item.width===1024&&item.height===576?'selected':item===defaultOption?'selected':''",
+            "item===defaultOption?'selected':''",
             self.app,
         )
         self.assertIn("form.get('resolution')", self.app)
@@ -951,8 +951,8 @@ class UIContractTest(unittest.TestCase):
         self.assertIn("</form></dialog>", self.index)
         self.assertEqual(1, self.index.count("</main>"))
         self.assertIn('/styles.css?v=20260906-42', self.index)
-        self.assertIn('/app.js?v=20261003-108', self.index)
-        self.assertIn('/frame-annotations.js?v=1', self.index)
+        self.assertIn('/app.js?v=20261103-1', self.index)
+        self.assertIn('/frame-annotations.js?v=2', self.index)
         self.assertIn('id="frameAnnotationDialog"', self.index)
 
     def test_initial_registry_refreshes_are_sequential(self):

@@ -96,6 +96,66 @@ class H3ServerPagingTest(unittest.TestCase):
         self.assertEqual(2, len(source_sets))
         self.assertEqual(2, len(result["jobs"]))
 
+    def test_results_focus_locates_exact_selected_job_on_later_page(self):
+        for index in range(12):
+            self._candidate(index, selected=True)
+        result = h3_queue.results_page(self.root, {
+            "focus_job_id": "job-00", "page": 1, "page_size": 10,
+        })
+        self.assertEqual({"job_id": "job-00", "found": True}, result["focus"])
+        self.assertEqual(2, result["pagination"]["page"])
+        self.assertIn("job-00", [row["job_id"] for row in result["jobs"]])
+        self.assertEqual(2, result["pagination"]["total_pages"])
+
+    def test_results_focus_respects_filters_and_never_selects_missing_job(self):
+        self._candidate(1, selected=True)
+        self._candidate(2, selected=False)
+        for filters in [
+            {"focus_job_id": "job-02"},
+            {"focus_job_id": "gone"},
+            {"focus_job_id": "job-01", "project_id": "project-b"},
+            {"focus_job_id": "job-01", "scene_id": "scene-2"},
+        ]:
+            with self.subTest(filters=filters):
+                result = h3_queue.results_page(self.root, filters)
+                self.assertFalse(result["focus"]["found"])
+                self.assertEqual(1, result["pagination"]["page"])
+
+    def test_results_focus_distinguishes_selected_siblings_in_one_clip(self):
+        set_id, first_job = self._candidate(1, selected=True)
+        sibling = "job-01-sibling"
+        atomic_write_json(self.paths["jobs"] / sibling / "request.json", {
+            "job_id": sibling, "candidate_set_id": set_id,
+            "source_project_id": "project-a", "source_scene_id": "scene-1",
+            "source_clip_id": "clip-01", "candidate_index": 2,
+        })
+        atomic_write_json(self.paths["jobs"] / sibling / "status.json", {"status": "completed"})
+        from job_queue import read_json
+        set_file = self.paths["candidate_sets"] / set_id / "candidate_set.json"
+        payload = read_json(set_file, {})
+        payload["candidate_job_ids"].append(sibling)
+        payload["selected_jobs"].append({"job_id": sibling, "selected_at": "2026-10-25T00:00:00Z"})
+        atomic_write_json(set_file, payload)
+        result = h3_queue.results_page(self.root, {
+            "focus_job_id": first_job, "page_size": 1,
+        })
+        self.assertTrue(result["focus"]["found"])
+        self.assertEqual(2, result["pagination"]["page"])
+        self.assertEqual(first_job, result["candidate_sets"][0]["selected_job_id"])
+
+    def test_independent_notebook_can_filter_one_clip_without_adding_ownership(self):
+        set_id, job_id = self._candidate(3)
+        self._candidate(4)
+        path = self.paths["candidate_sets"] / set_id / "candidate_set.json"
+        result = h3_queue.candidate_page(self.root, {"project_id": "project-a", "scene_id": "scene-1", "clip_id": "clip-03"})
+        self.assertEqual(result["pagination"]["total"], 1)
+        self.assertEqual(result["jobs"][0]["job_id"], job_id)
+        self.assertIn("clip-03", result["filters"]["clips_by_project_scene"]["project-a"]["scene-1"])
+        # reconcile may update derived status; note filtering never adds ownership fields.
+        after = path.read_text()
+        self.assertNotIn("note_id", after)
+        self.assertIn('"source_clip_id": "clip-03"', after)
+
     def test_results_page_omits_failed_and_cancelled_rerender_history(self):
         source_set_id, source_job_id = self._candidate(1, selected=True)
         statuses = {

@@ -12,6 +12,10 @@ import benchmark_jobs
 import h3_prompt_projects
 import h3_frame_export as h3_frame_export_module
 import h3_frame_annotations
+import feedback_notes
+import project_comparisons
+import selected_screening
+import music_library
 import h3_queue
 import model_test_analysis
 import model_test_assets
@@ -129,6 +133,11 @@ def queue_h3_scene_candidates(data: dict[str, Any]) -> dict[str, Any]:
     return h3_queue.enqueue_scene_candidate_sets(ROOT, data)
 
 
+def queue_h3_project_candidates(data: dict[str, Any]) -> dict[str, Any]:
+    model_test_registry.ensure_h3_r2v_adapter(ROOT, WORKFLOW_DIR)
+    return h3_queue.enqueue_project_candidate_sets(ROOT, data)
+
+
 def force_stop_h3_group(data: dict[str, Any]) -> dict[str, Any]:
     return h3_queue.force_stop_group(
         ROOT,
@@ -152,25 +161,10 @@ def requeue_h3_candidate_set(data: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def save_h3_prompt_revision_request(data: dict[str, Any]) -> dict[str, Any]:
-    return h3_queue.save_prompt_revision_request(
-        ROOT,
-        str(data.get("candidate_set_id") or ""),
-        data,
-    )
 
 
-def revise_h3_candidate_set(data: dict[str, Any]) -> dict[str, Any]:
-    """Backward-compatible alias; this only saves feedback and runs no model."""
-    return save_h3_prompt_revision_request(data)
 
 
-def apply_h3_prompt_revision(data: dict[str, Any]) -> dict[str, Any]:
-    return h3_queue.apply_authored_prompt_revision(
-        ROOT,
-        str(data.get("prompt_revision_request_id") or ""),
-        data,
-    )
 
 
 def restore_h3_candidate_version(data: dict[str, Any]) -> dict[str, Any]:
@@ -458,6 +452,16 @@ def export_model_tests(data: dict[str, Any]) -> dict[str, Any]:
 Action = Callable[[dict[str, Any]], dict[str, Any]]
 
 ACTIONS: dict[str, Action] = {
+    "music_library_list": lambda data: music_library.listing(ROOT, data),
+    "music_library_download": lambda data: music_library.download(ROOT, data),
+    "project_comparisons_list": lambda data: project_comparisons.listing(ROOT, data),
+    "project_comparisons_save": lambda data: project_comparisons.save(ROOT, data),
+    "project_comparisons_load": lambda data: project_comparisons.load(ROOT, data),
+    "feedback_notes_list": lambda data: feedback_notes.listing(ROOT, data),
+    "feedback_notes_load": lambda data: feedback_notes.load(ROOT, data),
+    "feedback_notes_save": lambda data: feedback_notes.save(ROOT, data),
+    "feedback_notes_history": lambda data: feedback_notes.history(ROOT, data),
+    "feedback_notes_video": lambda data: feedback_notes.video_context(ROOT, data),
     "h3_config": h3_config,
     "h3_state": h3_state,
     "control_windows_render_power": control_windows_render_power,
@@ -465,18 +469,18 @@ ACTIONS: dict[str, Action] = {
     "set_windows_power_policy": set_windows_power_policy,
     "h3_candidate_page": h3_candidate_page,
     "h3_results_page": h3_results_page,
+    "selected_screening_load": lambda data: selected_screening.playlist(ROOT, data),
+    "selected_screening_save": lambda data: selected_screening.save(ROOT, data),
     "h3_clip_versions": h3_clip_versions,
     "create_h3_candidate_set": create_h3_candidate_set,
     "create_h3_project_test_set": create_h3_project_test_set,
     "queue_h3_project_test_set": queue_h3_project_test_set,
     "delete_h3_project_test_set": delete_h3_project_test_set,
     "queue_h3_scene_candidates": queue_h3_scene_candidates,
+    "queue_h3_project_candidates": queue_h3_project_candidates,
     "force_stop_h3_group": force_stop_h3_group,
     "select_h3_candidate": select_h3_candidate,
     "requeue_h3_candidate_set": requeue_h3_candidate_set,
-    "save_h3_prompt_revision_request": save_h3_prompt_revision_request,
-    "revise_h3_candidate_set": revise_h3_candidate_set,
-    "apply_h3_prompt_revision": apply_h3_prompt_revision,
     "restore_h3_candidate_version": restore_h3_candidate_version,
     "create_h3_resolution_rerender": create_h3_resolution_rerender,
     "create_h3_video_upscale": create_h3_video_upscale,

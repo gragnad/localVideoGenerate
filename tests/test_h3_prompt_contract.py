@@ -248,6 +248,107 @@ class H3PromptContractTest(unittest.TestCase):
         self.assertIn("<Picture 4> is the chronological four-panel storyboard", prompt)
         self.assertNotIn("<Subject 4>", prompt)
 
+    def test_split_dialogue_may_continue_without_a_second_speaker_tag(self):
+        spec = valid_spec()
+        spec["shots"][0]["description"] = (
+            "Under the dusk sky <Subject 1> Lua grips her spear and <Subject 1> (S1) says, "
+            "<d>[Korean]멈춰.</d> She pauses to take a ragged breath, then continues, "
+            "<d>[Korean]돌아가.</d> Her breathing stays heavy."
+        )
+        self.assertTrue(contract.validate_prompt(contract.render_prompt(spec)).valid)
+
+        spec["shots"][0]["description"] = (
+            "Under the dusk sky <Subject 1> Lua grips her spear and <Subject 1> (S1) says, "
+            "<d>[Korean]멈춰.</d> She looks away. <d>[Korean]돌아가.</d>"
+        )
+        with self.assertRaises(contract.PromptContractError) as raised:
+            contract.render_prompt(spec)
+        self.assertIn(
+            "dialogue_speaker_missing",
+            {issue.code for issue in raised.exception.report.errors},
+        )
+
+    def test_ir_style_findings_are_warnings_only(self):
+        spec = valid_spec()
+        spec["shots"][0]["description"] = (
+            "A wide view from far out frames <Subject 1> Lua small in the frame; "
+            "from the first frame she braces, and <Subject 1> (S1) says, "
+            "<d>[Korean]…멈춰. 돌아가.</d> The frame holds on her until the shot ends."
+        )
+        report = contract.validate_prompt(contract.render_prompt(spec), duration_seconds=4)
+        self.assertTrue(report.valid, report.as_dict())
+        codes = {issue.code for issue in report.warnings}
+        for code in ("style_frame_hold", "style_from_first_frame", "style_far_small", "style_semicolon",
+                     "style_shot_light_missing", "style_dialogue_leading_ellipsis",
+                     "style_dialogue_multi_sentence"):
+            self.assertIn(code, codes)
+
+        spec["shots"][0]["description"] = (
+            "A medium shot of <Subject 1> Lua, braced at the right edge of frame. "
+            "The camera is fixed at her eye level, viewing her from the side. "
+            "The red dusk sky lights her face from the left. "
+            "She draws a sharp breath and <Subject 1> (S1) says, <d>[Korean]멈춰.</d> "
+            "She pauses to take a ragged breath, then continues, <d>[Korean]돌아가.</d> "
+            "Her chest keeps heaving as the wind hisses over the stones."
+        )
+        report = contract.validate_prompt(contract.render_prompt(spec), duration_seconds=4)
+        self.assertTrue(report.valid, report.as_dict())
+        self.assertFalse([i.code for i in report.warnings if i.code.startswith("style_")])
+
+    def test_shot_structure_and_quoted_sound_warnings(self):
+        spec = valid_spec()
+        spec["shots"][0]["description"] = (
+            "A fixed medium close-up of <Subject 1> Lua, her black ponytail and navy wrap top, standing on the stone path, "
+            "framed from the top of her head to her chest with a hand-span of space above her head, at her eye level. "
+            "Torchlight lights her face. She knocks on the branch, and a clear 'tong— tong—' answers."
+        )
+        report = contract.validate_prompt(contract.render_prompt(spec), duration_seconds=4)
+        self.assertTrue(report.valid, report.as_dict())
+        codes = {issue.code for issue in report.warnings}
+        for code in ("style_shot_opener_long", "style_camera_sentence_missing", "style_romanized_onomatopoeia"):
+            self.assertIn(code, codes)
+
+        spec["shots"][0]["description"] = (
+            "A medium close-up of <Subject 1> Lua, standing on the stone path. "
+            "The camera is fixed at her eye level, viewing her from the front. "
+            "Torchlight lights Lua's face from the left. She knocks on the branch, and a clear, ringing hollow tone answers."
+        )
+        report = contract.validate_prompt(contract.render_prompt(spec), duration_seconds=4)
+        self.assertFalse([i.code for i in report.warnings if i.code.startswith("style_")])
+
+
+    def test_ep08_face_low_prop_wide_small_and_creature_sound_warnings(self):
+        spec = valid_spec()
+        spec["shots"][0]["description"] = (
+            "A medium close-up of <Subject 1> Lua, sitting on a low stool. "
+            "The camera is fixed at her seated eye level, viewing her from the front. "
+            "Firelight lights her face. The old shaft lies across her knees as the coals crackle."
+        )
+        codes = {i.code for i in contract.validate_prompt(contract.render_prompt(spec), duration_seconds=4).warnings}
+        self.assertIn("style_mcu_low_prop", codes)
+
+        spec["shots"][0]["description"] = (
+            "A wide view of the harbor at dusk. The camera is fixed on the pier, viewing the sea. "
+            "Dusk light glows on the water. The boat sits small at the center of the frame as waves lap."
+        )
+        codes = {i.code for i in contract.validate_prompt(contract.render_prompt(spec), duration_seconds=4).warnings}
+        self.assertIn("style_wide_subject_small", codes)
+
+        spec["shots"][0]["description"] = (
+            "A close-up of <Subject 1> Mir by the bench. The camera is fixed at its eye level, viewing its face. "
+            "Window light falls on its face. Mir tilts its head, and <Subject 1> (S1) sniffs, <d>[Korean] 킁?</d>"
+        )
+        codes = {i.code for i in contract.validate_prompt(contract.render_prompt(spec), duration_seconds=4).warnings}
+        self.assertIn("style_creature_onomatopoeia_dialogue", codes)
+
+        spec["shots"][0]["description"] = (
+            "A medium shot of <Subject 1> Lua, sitting on a low stool. "
+            "The camera is fixed at her seated eye level, viewing her from the front. "
+            "Firelight lights her face. She holds the shaft at chest height, and <Subject 1> (S1) says, <d>[Korean] 네.</d>"
+        )
+        codes = {i.code for i in contract.validate_prompt(contract.render_prompt(spec), duration_seconds=4).warnings}
+        for code in ("style_mcu_low_prop", "style_wide_subject_small", "style_creature_onomatopoeia_dialogue"):
+            self.assertNotIn(code, codes)
 
 if __name__ == "__main__":
     unittest.main()

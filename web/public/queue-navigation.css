@@ -1,0 +1,10 @@
+.queue-job-navigation{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+.queue-job-navigation button,.queue-current-navigation{min-height:44px;font-size:14px}
+.queue-job-navigation small{color:var(--muted);overflow-wrap:anywhere}
+.queue-current-navigation{margin-top:12px}
+.queue-navigation-target{outline:3px solid var(--accent);outline-offset:3px;scroll-margin-top:24px}
+.queue-navigation-context{padding:10px 12px;border:1px solid var(--accent);border-radius:8px;color:var(--accent);font-size:14px;overflow-wrap:anywhere}
+#queueJobRecord{width:min(850px,calc(100vw - 24px));max-height:85dvh;overflow:auto;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:18px}
+#queueJobRecord::backdrop{background:#000a}
+#queueJobRecord pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.6 monospace;max-height:60dvh;overflow:auto}
+#queueJobRecord button{min-height:44px}

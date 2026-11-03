@@ -7,9 +7,18 @@
   <link rel="stylesheet" href="/styles.css?v=20260906-42">
   <link rel="stylesheet" href="/review.css?v=20260807-1">
   <link rel="stylesheet" href="/frame-annotations.css?v=1">
+  <link rel="stylesheet" href="/interaction-feedback.css?v=20261014-1">
+  <link rel="stylesheet" href="/feedback-notes.css?v=20261102-2">
+  <link rel="stylesheet" href="/sidebar.css?v=20261020-1">
+  <link rel="stylesheet" href="/project-compare.css?v=20261024-1">
+  <link rel="stylesheet" href="/playback-review.css?v=20261031-1">
+  <link rel="stylesheet" href="/music-library.css?v=20261022-2">
+  <link rel="stylesheet" href="/queue-navigation.css?v=20261025-1">
+  <link rel="stylesheet" href="/result-filters.css?v=20261102-1">
+  <link rel="stylesheet" href="/project-generation.css?v=20261102-1">
 </head>
 <body>
-<aside>
+<aside id="studioSidebar">
   <div class="brand">
     <small>NALSTUDIO · DGX SPARK</small>
     <strong>H3 Director<br>Studio</strong>
@@ -25,6 +34,9 @@
       <button data-page="model-management">07 모델 관리</button>
       <button data-page="model-tests">08 모델 테스트</button>
       <button data-page="r2v-tests">09 R2V 테스트</button>
+      <button data-page="feedback">10 피드백 노트</button>
+      <button data-page="compare">11 프로젝트 후보 비교</button>
+      <button data-page="music">12 음악 라이브러리</button>
     </nav>
     <div class="sidebar-footer">
       <div id="services" class="services"></div>
@@ -32,8 +44,10 @@
     </div>
   </div>
 </aside>
+<button id="sidebarBackdrop" aria-label="메뉴 닫기" hidden></button>
 <main>
   <header>
+    <button type="button" id="sidebarToggle" aria-controls="studioSidebar" aria-expanded="true">☰ 메뉴 접기</button>
     <div>
       <small>MINIMAX H3 · BATCH-FREE VIDEO PRODUCTION</small>
       <h1 id="title">H3 R2V 생성</h1>
@@ -42,11 +56,7 @@
   </header>
   <div id="notice"></div>
   <section data-view="create">
-    <div class="heading">
-      <p class="eyebrow">MINIMAX H3 · BATCH-FREE PRODUCTION</p>
-      <h2>클립의 최종 프롬프트 하나로 후보 영상을 생성합니다.</h2>
-      <p>선택한 개수만큼 서로 다른 Seed의 후보를 만들며, 렌더는 Windows PC의 ComfyUI에서 실행하고 결과는 이 제작기로 회수합니다.</p>
-    </div>
+
     <div class="panel h3-project-loader">
       <div class="model-test-head">
         <div>
@@ -55,6 +65,7 @@
         </div>
         <div class="model-test-head-actions"><button type="button" id="deleteH3Project" class="danger" disabled>선택 프로젝트 삭제</button><button type="button" id="refreshH3Projects">프로젝트 새로고침</button></div>
       </div>
+      <label>에피소드<select id="h3Episode" aria-label="R2V 에피소드" style="min-height:48px"><option value="">전체 에피소드</option></select></label>
       <div class="grid3">
         <label>프로젝트<select id="h3Project"><option value="">프로젝트 선택</option></select></label>
         <label>씬<select id="h3Scene" disabled><option value="">씬 선택</option></select></label>
@@ -115,11 +126,7 @@
   </section>
 
   <section data-view="i2v-create" hidden>
-    <div class="heading">
-      <p class="eyebrow">MINIMAX H3 · FIRST-FRAME I2V PRODUCTION</p>
-      <h2>클립마다 시작 이미지 한 장으로 H3 I2V 후보를 생성합니다.</h2>
-      <p>프로젝트·씬·클립 흐름은 R2V와 동일하며, 각 클립의 첫 프레임 이미지를 영상 시작점으로 사용합니다.</p>
-    </div>
+
     <div class="panel h3-project-loader">
       <div class="model-test-head">
         <div>
@@ -189,11 +196,7 @@
   </section>
 
   <section data-view="queue" hidden>
-    <div class="heading">
-      <p class="eyebrow">H3 GENERATION QUEUE</p>
-      <h2>Windows 후보 큐와 로컬 생성 큐를 서로 독립적으로 실행합니다.</h2>
-      <p>01·02 후보 생성은 Windows에서, 05 해상도 재생성과 08·09 모델 테스트는 로컬에서 동시에 처리합니다.</p>
-    </div>
+
     <div class="panel model-test-head">
       <div><h3>Windows 후보 / 로컬 생성 · 독립 큐 상태</h3><p id="queueUpdated" class="muted">상태 불러오는 중…</p></div>
       <button type="button" id="refreshH3State">새로고침</button>
@@ -210,11 +213,7 @@
   </section>
 
   <section data-view="candidates" hidden>
-    <div class="heading">
-      <p class="eyebrow">H3 CANDIDATE SELECTION</p>
-      <h2>독립 생성된 H3 후보를 비교하고 클립당 하나를 선택합니다.</h2>
-      <p>완료된 후보 영상을 직접 비교하고 사용할 결과를 선택합니다.</p>
-    </div>
+
     <div class="panel model-test-head">
       <div><h3>H3 후보군</h3><p id="h3CandidateSummary" class="muted">완료된 후보만 재생하고 선택할 수 있습니다. 표시 시간은 큐 대기를 제외한 H3 Worker 처리 시간입니다.</p></div>
       <div class="h3-candidate-review-controls">
@@ -222,7 +221,8 @@
       </div>
     </div>
     <div class="panel h3-source-filters" aria-label="후보군 프로젝트 및 씬 필터">
-      <div><b>후보군 필터</b><small>원하는 프로젝트와 씬의 후보군만 표시합니다.</small></div>
+      <div><b>후보군 필터</b><small>에피소드·프로젝트·씬의 후보군을 표시합니다.</small></div>
+      <label>에피소드<select id="h3CandidateEpisodeFilter"><option value="">전체 에피소드</option></select></label>
       <label>프로젝트<select id="h3CandidateProjectFilter"><option value="">전체 프로젝트</option></select></label>
       <label>씬<select id="h3CandidateSceneFilter"><option value="">전체 씬</option></select></label>
       <button type="button" id="resetH3CandidateFilters">필터 초기화</button>
@@ -237,11 +237,7 @@
   </section>
 
   <section data-view="results" hidden>
-    <div class="heading">
-      <p class="eyebrow">H3 SELECTED RESULTS</p>
-      <h2>선택을 완료한 H3 결과 영상을 후보별로 확인합니다.</h2>
-      <p>각 선택 후보와 해상도 재생성 결과를 한 카드에서 비교하고, R2V 결과는 동일 설정으로 더 높은 해상도에 다시 등록할 수 있습니다.</p>
-    </div>
+
     <div class="panel model-test-head">
       <div>
         <h3>선택 완료 결과</h3>
@@ -249,19 +245,40 @@
       </div>
       <button type="button" id="refreshH3Results">새로고침</button>
     </div>
-    <div class="panel h3-source-filters" aria-label="선택 결과 프로젝트 및 씬 필터">
-      <div><b>결과 필터</b><small>선택한 후보 중 원하는 프로젝트와 씬만 표시합니다.</small></div>
+    <div class="panel h3-source-filters h3-result-filters" aria-label="선택 결과 프로젝트·씬·재생성 횟수 필터">
+      <div class="h3-result-filter-heading"><b>결과 필터</b><small>에피소드를 고르면 여러 프로젝트·버전에서 선택한 결과를 모두 표시합니다.</small></div>
+      <label>에피소드<select id="h3ResultEpisodeFilter"><option value="">전체 에피소드</option></select></label>
       <label>프로젝트<select id="h3ResultProjectFilter"><option value="">전체 프로젝트</option></select></label>
       <label>씬<select id="h3ResultSceneFilter"><option value="">전체 씬</option></select></label>
+      <label>재생성 횟수<select id="h3ResultRerenderCountFilter" title="해상도 재생성 기록 수: 대기·진행·완료 포함, 실패·취소 제외">
+        <option value="">전체 횟수</option><option value="0">0개 · 재생성 없음</option>
+        <option value="1">1개</option><option value="2">2개</option><option value="3">3개</option>
+        <option value="4">4개</option><option value="5">5개</option><option value="n">N개 · 6개 이상</option>
+      </select></label>
+      <label>정렬<select id="h3ResultSort"><option value="name" selected>클립 이름순</option><option value="recent">최근 선택순</option></select></label>
+      <div class="h3-result-filter-actions">
       <button type="button" id="resetH3ResultFilters">필터 초기화</button>
+      <button type="button" id="openSelectedScreening" title="관련 프로젝트를 여러 개 선택해 선택 영상을 함께 연속 시청">선택 클립 연속 시청</button>
+      </div>
     </div>
     <p class="h3-result-time-note">Worker가 작업을 시작한 뒤 영상 저장까지의 내부 처리·ComfyUI 대기·생성 시간이며 H3 FIFO 큐 대기는 제외됩니다.</p>
     <nav id="h3ResultsPaginationTop" class="h3-results-pagination h3-pagination-top" data-h3-results-pagination aria-label="선택 결과 위쪽 페이지" hidden></nav>
     <div id="h3SelectedResults" class="h3-selected-results muted">선택을 완료한 H3 결과가 없습니다.</div>
     <nav id="h3ResultsPagination" class="h3-results-pagination" data-h3-results-pagination aria-label="선택 결과 아래쪽 페이지" hidden></nav>
   </section>
+  <section data-view="music" hidden>
+
+    <form id="musicSearchForm" class="panel music-filters" role="search">
+      <label>음악 검색<input id="musicSearch" type="search" placeholder="제목·설명·분위기·장르·태그" maxlength="500"></label>
+      <label>정렬<select id="musicSort"><option value="newest">최근 등록순</option><option value="name">제목순</option></select></label>
+      <button type="submit">검색</button><button type="button" id="musicRefresh">목록 새로고침</button>
+    </form>
+    <p id="musicStatus" class="muted" role="status" aria-live="polite"></p>
+    <div id="musicList" class="music-list"></div>
+    <div class="music-pager"><button type="button" id="musicPrevious">이전</button><span id="musicPage"></span><button type="button" id="musicNext">다음</button></div>
+  </section>
   <section data-view="action-assets" hidden>
-    <div class="heading"><p class="eyebrow">H3 MOTION-ONLY ACTION LIBRARY</p><h2>액션 참조 영상을 독립 자산으로 관리합니다.</h2><p>원본과 H3용 1024×576 · 24fps · H.264 무음 사본, 참가자 역할, 동작과 권리 상태를 함께 보존합니다.</p></div>
+
     <form id="h3ActionUploadForm" class="panel h3-action-form">
       <div class="model-test-head"><div><h3>액션 영상 업로드</h3><p class="muted">Blender 제작 영상, 직접 제작·소유 영상 또는 권리를 확인할 스톡 원본을 등록합니다. 원본은 보존하고 H3용 무음 사본을 자동으로 준비합니다.</p></div><button type="button" id="refreshH3ActionAssets">목록 새로고침</button></div>
       <div class="grid3">
@@ -301,12 +318,12 @@
     <div class="panel h3-action-filters"><div><b>액션 자산 필터</b><small id="h3ActionAssetSummary">목록을 불러오는 중입니다.</small></div><label>종류<select id="h3ActionFilterCategory"><option value="">전체 종류</option></select></label><label>참가자<select id="h3ActionFilterCount"><option value="">전체</option><option value="1">한 명</option><option value="2">두 명</option></select></label><label>신체 유형<select id="h3ActionFilterBody"><option value="">전체 신체 유형</option></select></label><label>출처<select id="h3ActionFilterSource"><option value="">전체 출처</option><option value="internal_generated">내부 생성</option><option value="blender_render">Blender 제작</option><option value="direct_upload">직접 등록</option><option value="external_licensed">외부 라이선스</option></select></label><label>상태<select id="h3ActionFilterState"><option value="">전체 상태</option><option value="available">H3 사용 가능</option><option value="needs_preparation">준비 필요</option><option value="rights_review_required">권리 확인 필요</option></select></label></div>
     <div id="h3ActionAssetList" class="h3-action-assets muted">등록된 액션 자산이 없습니다.</div>
   </section>
-<section data-view="model-management" hidden><div class="heading"><p class="eyebrow">MODEL MANAGEMENT</p><h2>모델과 워크플로우를 등록하고 역량을 관리합니다.</h2><p>I2V와 R2V 모델·워크플로우·어댑터를 한곳에서 관리하고, 실행 근거를 유형별 평가 차원으로 분석합니다.</p></div><div class="model-test-summary" id="modelManagementSummary"></div><div id="modelManagementForms" class="model-test-forms model-management-forms"></div><div id="modelManagementAnalysis"></div><div id="modelManagementComparison"></div></section>
-<section data-view="model-tests" hidden><div class="heading"><p class="eyebrow">MODEL BENCHMARK LAB</p><h2>일반 모델 테스트를 계획하고 검수합니다.</h2><p>일반 I2V 테스트 세션과 케이스·자산·결과만 관리합니다. 모델과 워크플로우 등록 및 역량 분석은 07 모델 관리에서 진행합니다.</p></div><div class="model-test-summary" id="modelTestSummary"></div><div class="model-test-forms"><form id="testModelForm" class="panel"><h3>1. 모델 프로필</h3><div class="grid2"><label>제작사<input name="provider" required placeholder="예: Black Forest Labs"></label><label>제품군<input name="family" required placeholder="예: FLUX"></label><label>표시 이름<input name="display_name" required placeholder="예: FLUX Video Open"></label><label>버전<input name="version" placeholder="공식 버전"></label></div><label>공식 출처 URL<input name="source_url" type="url" placeholder="모델 카드 또는 공식 발표"></label><label>라이선스<input name="license_name" placeholder="확인되지 않으면 비워 둠"></label><button class="primary">모델 등록</button></form><form id="testWorkflowForm" class="panel"><h3>2. 워크플로우 프로필</h3><label>모델<select name="model_id" id="testWorkflowModel" required></select></label><label>ComfyUI 워크플로우<select name="workflow_filename" id="testWorkflowFile" required></select></label><label>유형<select name="profile_kind"><option value="official_baseline">공식 기준선</option><option value="controlled_variant">통제 변형</option><option value="optimized_variant">프로젝트 최적화</option></select></label><label>프로필 이름<input name="name" required placeholder="공식 샘플 워크플로우"></label><label>공식 출처 URL<input name="source_url" type="url"></label><label>메모<textarea name="notes" placeholder="변경하지 않은 공식 기본값과 확인 사항"></textarea></label><button class="primary">워크플로우 등록</button></form><form id="testAdapterForm" class="panel"><h3>3. 워크플로우 어댑터</h3><label>워크플로우 프로필<select name="workflow_profile_id" id="testAdapterWorkflow" required></select></label><div class="grid2"><label>어댑터 이름<input name="adapter_name" value="Official bindings" required></label><label>버전<input name="adapter_version" value="1" required></label></div><label>프롬프트 템플릿<textarea name="prompt_template" required>{prompt}</textarea><small>{prompt}는 공통 영문 정규 프롬프트, {intent_ko}는 한국어 의도입니다.</small></label><button type="button" id="inspectTestWorkflow">입력 노드 검사</button><div id="testAdapterBindings" class="model-test-bindings muted">워크플로우를 선택하고 입력 노드를 검사하세요.</div><button class="primary">어댑터 검증 · 등록</button></form><form id="testSessionForm" class="panel"><h3>일반 테스트 세션</h3><label>모델<select name="model_id" id="testSessionModel" required></select></label><label>등록 워크플로우<select name="workflow_profile_id" id="testSessionWorkflow" required></select></label><label>검증된 어댑터<select name="adapter_id" id="testSessionAdapter" required></select></label><label>테스트 세트<select name="suite_id" id="testSessionSuite" required></select></label><label>출력 해상도<select name="resolution" id="testSessionResolution" required><option value="512x288">512 × 288 · 빠른 저해상도</option><option value="608x352">608 × 352 · H3 초고속 테스트</option><option value="768x432" selected>768 × 432 · 기본 비교</option><option value="832x480">832 × 480 · MiniMax H3 빠른 테스트</option><option value="960x544">960 × 544 · 중간 해상도</option><option value="1024x576">1024 × 576 · 16:9</option><option value="1280x704">1280 × 704 · 고품질 후보</option><option value="1280x736">1280 × 736 · H3 확장 고해상도</option><option value="1344x768">1344 × 768 · MiniMax H3 고품질</option><option value="1536x864">1536 × 864 · 고해상도</option></select><small>실행 계획에 고정되며 어댑터의 너비·높이 바인딩으로 전달됩니다.</small></label><label>케이스별 반복 횟수<input name="repetitions" type="number" min="1" max="10" value="1"></label><label>세션 메모<textarea name="notes" placeholder="1회 빠른 진단 후 필요한 케이스만 반복 권장"></textarea></label><button class="primary alt">실행 계획 생성</button></form></div><div class="panel"><div class="model-test-head"><div><h3>테스트 케이스</h3><p class="muted">공통 진단과 I2V 고정 앵커 세트의 입력·평가 기준만 표시됩니다. H3 R2V는 09 R2V 테스트에서 별도로 관리합니다.</p></div><div class="model-test-head-actions"><button type="button" id="toggleModelTestCases">공통 케이스 접기</button>
+<section data-view="model-management" hidden><div class="model-test-summary" id="modelManagementSummary"></div><div id="modelManagementForms" class="model-test-forms model-management-forms"></div><div id="modelManagementAnalysis"></div><div id="modelManagementComparison"></div></section>
+<section data-view="model-tests" hidden><div class="model-test-summary" id="modelTestSummary"></div><div class="model-test-forms"><form id="testModelForm" class="panel"><h3>1. 모델 프로필</h3><div class="grid2"><label>제작사<input name="provider" required placeholder="예: Black Forest Labs"></label><label>제품군<input name="family" required placeholder="예: FLUX"></label><label>표시 이름<input name="display_name" required placeholder="예: FLUX Video Open"></label><label>버전<input name="version" placeholder="공식 버전"></label></div><label>공식 출처 URL<input name="source_url" type="url" placeholder="모델 카드 또는 공식 발표"></label><label>라이선스<input name="license_name" placeholder="확인되지 않으면 비워 둠"></label><button class="primary">모델 등록</button></form><form id="testWorkflowForm" class="panel"><h3>2. 워크플로우 프로필</h3><label>모델<select name="model_id" id="testWorkflowModel" required></select></label><label>ComfyUI 워크플로우<select name="workflow_filename" id="testWorkflowFile" required></select></label><label>유형<select name="profile_kind"><option value="official_baseline">공식 기준선</option><option value="controlled_variant">통제 변형</option><option value="optimized_variant">프로젝트 최적화</option></select></label><label>프로필 이름<input name="name" required placeholder="공식 샘플 워크플로우"></label><label>공식 출처 URL<input name="source_url" type="url"></label><label>메모<textarea name="notes" placeholder="변경하지 않은 공식 기본값과 확인 사항"></textarea></label><button class="primary">워크플로우 등록</button></form><form id="testAdapterForm" class="panel"><h3>3. 워크플로우 어댑터</h3><label>워크플로우 프로필<select name="workflow_profile_id" id="testAdapterWorkflow" required></select></label><div class="grid2"><label>어댑터 이름<input name="adapter_name" value="Official bindings" required></label><label>버전<input name="adapter_version" value="1" required></label></div><label>프롬프트 템플릿<textarea name="prompt_template" required>{prompt}</textarea><small>{prompt}는 공통 영문 정규 프롬프트, {intent_ko}는 한국어 의도입니다.</small></label><button type="button" id="inspectTestWorkflow">입력 노드 검사</button><div id="testAdapterBindings" class="model-test-bindings muted">워크플로우를 선택하고 입력 노드를 검사하세요.</div><button class="primary">어댑터 검증 · 등록</button></form><form id="testSessionForm" class="panel"><h3>일반 테스트 세션</h3><label>모델<select name="model_id" id="testSessionModel" required></select></label><label>등록 워크플로우<select name="workflow_profile_id" id="testSessionWorkflow" required></select></label><label>검증된 어댑터<select name="adapter_id" id="testSessionAdapter" required></select></label><label>테스트 세트<select name="suite_id" id="testSessionSuite" required></select></label><label>출력 해상도<select name="resolution" id="testSessionResolution" required><option value="512x288">512 × 288 · 빠른 저해상도</option><option value="608x352">608 × 352 · H3 초고속 테스트</option><option value="768x432" selected>768 × 432 · 기본 비교</option><option value="832x480">832 × 480 · MiniMax H3 빠른 테스트</option><option value="960x544">960 × 544 · 중간 해상도</option><option value="1024x576">1024 × 576 · 16:9</option><option value="1280x704">1280 × 704 · 고품질 후보</option><option value="1280x736">1280 × 736 · H3 확장 고해상도</option><option value="1344x768">1344 × 768 · MiniMax H3 고품질</option><option value="1536x864">1536 × 864 · 고해상도</option></select><small>실행 계획에 고정되며 어댑터의 너비·높이 바인딩으로 전달됩니다.</small></label><label>케이스별 반복 횟수<input name="repetitions" type="number" min="1" max="10" value="1"></label><label>세션 메모<textarea name="notes" placeholder="1회 빠른 진단 후 필요한 케이스만 반복 권장"></textarea></label><button class="primary alt">실행 계획 생성</button></form></div><div class="panel"><div class="model-test-head"><div><h3>테스트 케이스</h3><p class="muted">공통 진단과 I2V 고정 앵커 세트의 입력·평가 기준만 표시됩니다. H3 R2V는 09 R2V 테스트에서 별도로 관리합니다.</p></div><div class="model-test-head-actions"><button type="button" id="toggleModelTestCases">공통 케이스 접기</button>
 <button type="button" id="refreshModelTests">새로고침</button></div></div><div id="modelTestCases" class="model-test-cases"></div></div><details id="modelTestSessionHistory" class="panel r2v-collapse-panel model-test-session-history"><summary class="r2v-collapse-summary"><div><h3>테스트 세션 이력</h3><p id="modelTestSessionHistoryMeta" class="muted">세션 이력을 불러오는 중입니다.</p></div><span class="r2v-collapse-state" aria-hidden="true"></span></summary><div class="r2v-collapse-body"><div id="modelTestSessions"></div><div id="modelTestPreflightActions" class="model-test-preflights"></div></div></details><div id="modelManagementAnalysisPanel" class="panel"><div class="model-test-head"><div><h3>역량 분석 · 프롬프트 정책</h3><p class="muted">사람 리뷰를 우선하고, 없으면 최신 AI 리뷰를 사용해 I2V·R2V 유형별 증거 수와 신뢰도를 표시합니다.</p></div><div class="model-test-export-actions"><button type="button" id="exportModelTestsJson">JSON 내보내기</button>
 <button type="button" id="exportModelTestsCsv">CSV 내보내기</button></div></div><div class="model-test-analysis-controls"><label>모델<select id="modelTestAnalysisModel"></select></label><label>워크플로우 범위<select id="modelTestAnalysisWorkflow"><option value="">워크플로우 선택</option></select></label><button type="button" id="runModelTestAnalysis" class="primary">분석 갱신</button></div><div id="modelTestAnalysis" class="model-test-analysis"><p class="muted">I2V 또는 R2V 모델과 워크플로우를 선택해 분석하세요.</p></div></div><div id="modelManagementComparisonPanel" class="panel"><h3>모델 · 워크플로우 비교</h3><p class="muted">I2V와 R2V 워크플로우를 모두 표시하며 각 유형의 최신 리뷰 점수를 집계합니다.</p><div id="modelTestComparison" class="model-test-comparison"></div></div><div class="panel"><h3>테스트 결과 검수</h3><p class="muted">세션 이력의 「결과 검수」를 눌러 케이스별 영상을 확인하세요.</p><div id="modelTestResults" class="model-test-results"></div></div></section>
 <section data-view="r2v-tests" hidden>
-<div class="heading"><p class="eyebrow">R2V BENCHMARK LAB</p><h2>공유 캐릭터 시트와 케이스별 장면 자산으로<br>MiniMax H3 R2V를 독립 검증합니다.</h2><p>일반 모델 테스트와 자산을 분리합니다. 캐릭터·배경·보조 인물·소품은 새로 등록하며 Picture 순서를 고정해 실행합니다.</p></div>
+
 <div class="model-test-summary" id="r2vTestSummary"></div>
 <details id="r2vSharedAssetsPanel" class="panel r2v-collapse-panel"><summary class="r2v-collapse-summary"><div><h3>R2V 전역 공유 이미지</h3><p class="muted">테스트 세트와 관계없이 동일 캐릭터·동일 스타일 슬롯에 사용합니다. 한 번 등록하면 연결된 모든 Picture에 같은 SHA 자산이 적용됩니다.</p></div><span class="r2v-collapse-state" aria-hidden="true"></span></summary><div class="r2v-collapse-body"><div id="r2vSharedAssets" class="r2v-shared-assets"></div></div></details>
 <form id="r2vTestSessionForm" class="panel r2v-test-session-form"><h3>R2V 테스트 세션</h3><div class="grid2"><label>MiniMax H3 모델<select name="model_id" id="r2vTestSessionModel" required></select></label><label>R2V 워크플로우<select name="workflow_profile_id" id="r2vTestSessionWorkflow" required></select></label><label>R2V 어댑터<select name="adapter_id" id="r2vTestSessionAdapter" required></select></label><label>R2V 테스트 세트<select name="suite_id" id="r2vTestSessionSuite" required></select></label><label>출력 해상도<select name="resolution" id="r2vTestSessionResolution" required><option value="608x352">608 × 352 · 초고속 테스트</option><option value="736x416">736 × 416 · 빠른 테스트</option><option value="832x480" selected>832 × 480 · 기준 테스트</option><option value="1280x736">1280 × 736 · 확장 고해상도</option></select><small>가로·세로 모두 MiniMax H3의 32배수 해상도입니다.</small></label><label>케이스별 반복 횟수<input name="repetitions" type="number" min="1" max="10" value="1"></label></div>
@@ -317,7 +334,99 @@
 <div class="panel"><h3>R2V 테스트 결과 검수</h3><p class="muted">완료된 R2V 테스트 영상을 사람이 직접 검수합니다. 과거에 저장된 AI 검수 결과는 읽기 전용으로 함께 표시됩니다.</p><div id="r2vTestResults" class="model-test-results"></div></div>
 </section>
 
+  <section data-view="compare" hidden>
+    <div id="compareWorkspace" class="feedback-workspace compare-workspace">
+      <section id="compareVideos" class="feedback-videos" aria-label="두 프로젝트 영상 검토">
+        <div class="feedback-pane-head"><div id="compareNavigation"></div><h2>프로젝트 검토</h2><button id="compareRefresh" type="button" aria-label="프로젝트 목록 갱신">↻</button></div>
+        <div class="compare-projects"><div class="compare-project-filter"><label>에피소드 A<select id="compareEpisodeA" aria-label="A 에피소드"><option value="">전체 에피소드</option></select></label><label>프로젝트 A<select id="compareProjectA"></select></label></div><div class="compare-project-filter"><label>에피소드 B<select id="compareEpisodeB" aria-label="B 에피소드"><option value="">전체 에피소드</option></select></label><label>프로젝트 B<select id="compareProjectB"></select></label></div></div>
+        <div class="compare-step"><button id="compareFirst" type="button">처음부터</button><button id="comparePrevious" type="button">이전</button><select id="comparePosition" aria-label="검토 클립"></select><button id="compareNext" type="button">다음</button></div>
+        <div class="compare-control-row"><details id="compareOptions" class="compare-options"><summary aria-label="클립 대응 · 재생 설정">설정</summary><div class="compare-options-panel">
+          <button id="compareCloseOptions" type="button">설정 닫기</button>
+          <p>같은 씬·클립 ID만 자동 연결합니다. 버전별 이름이 다르면 아래에서 대응을 직접 확인하세요. 후보 전환은 채택 결과를 바꾸지 않습니다.</p>
+          <label>현재 A 클립의 B 대응<select id="compareMatch"></select></label><button id="compareSaveMatch" type="button">이 대응 저장</button>
+          <label>영상 영역 너비<input id="compareSplit" type="range" min="30" max="70" value="50"></label>
+          <div id="comparePlayback" class="dual-controls" aria-label="두 영상 동시 재생"></div>
+        </div></details>
+        <div class="compare-quick-play"><button id="comparePlay" type="button">▶ 함께 재생</button><button id="comparePause" type="button">함께 정지</button><select id="compareAudio" aria-label="비교 영상 소리"><option value="0">A 소리</option><option value="1">B 소리</option><option value="none">소리 끄기</option></select></div></div>
+        <p id="compareStatus" role="status" aria-live="polite"></p>
+        <section id="compareLeft" class="compare-review-video" data-compare-side="left" aria-label="프로젝트 A 영상"></section>
+        <section id="compareRight" class="compare-review-video" data-compare-side="right" aria-label="프로젝트 B 영상"></section>
+      </section>
+      <div id="compareResizer" class="feedback-resizer" role="separator" tabindex="0" aria-label="영상과 노트 너비 조절" aria-orientation="vertical" aria-controls="compareVideos feedbackNotebook" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50"></div>
+      <div id="compareNotebookHost" class="compare-notebook-host"></div>
+    </div>
+  </section>
+  <section data-view="feedback" hidden>
+    <div class="feedback-workspace" id="feedbackWorkspace">
+      <section id="feedbackVideos" class="feedback-videos" aria-label="후보 영상 확인">
+        <div class="feedback-pane-head"><div id="feedbackNavigation"></div><h2 id="feedbackVideoTitle" aria-live="polite">후보 영상</h2><button type="button" id="feedbackRefreshVideos" aria-label="후보 목록 갱신" title="후보 목록 갱신">↻</button></div>
+        <details class="feedback-options"><summary>후보 필터 · 화면 비율</summary><div class="feedback-filters">
+          <label>에피소드<select id="feedbackEpisode"><option value="">전체 에피소드</option></select></label>
+          <label>프로젝트<select id="feedbackProject"><option value="">전체 프로젝트</option></select></label>
+          <label>씬<select id="feedbackScene"><option value="">전체 씬</option></select></label>
+          <label>클립<select id="feedbackClip"><option value="">전체 클립</option></select></label>
+          <label>화면 비율<input id="feedbackSplit" type="range" min="30" max="70" value="50" aria-label="영상 영역 너비 비율"></label>
+        </div></details>
+        <div class="feedback-player">
+          <video id="feedbackVideo" controls playsinline preload="metadata" hidden></video>
+          <p id="feedbackVideoEmpty">아래 목록에서 완료된 후보를 선택하세요.</p>
+          <details class="feedback-options feedback-video-details"><summary>영상 상세 정보</summary><div id="feedbackVideoMeta" class="muted"></div></details>
+          <button type="button" id="feedbackInsertReference" disabled>현재 후보 · 시점을 노트에 넣기</button>
+        </div>
+        <div id="feedbackCandidateStatus" class="feedback-candidate-status muted" role="status" aria-live="polite"></div>
+        <div class="feedback-candidate-list" id="feedbackCandidateList" aria-label="후보군 목록"></div>
+        <div class="feedback-pager"><button type="button" id="feedbackPrevious">이전</button><span id="feedbackPageStatus" role="status"></span><button type="button" id="feedbackNext">다음</button></div>
+      </section>
+      <div id="feedbackResizer" class="feedback-resizer" role="separator" tabindex="0" aria-label="영상과 노트 너비 조절" aria-orientation="vertical" aria-controls="feedbackVideos feedbackNotebook" aria-valuemin="30" aria-valuemax="70" aria-valuenow="50" title="좌우로 끌어 너비 조절 · 방향키로도 조절할 수 있습니다"></div>
+      <section id="feedbackNotebook" class="feedback-notebook" aria-label="독립 피드백 노트">
+        <div class="feedback-menubar" role="group" aria-label="노트 메뉴">
+          <select id="feedbackNoteList" aria-label="노트 선택"><option value="">노트를 선택하세요</option></select>
+          <details id="feedbackFileMenu" class="feedback-menu"><summary>파일</summary><div class="feedback-menu-panel">
+            <button type="button" id="feedbackNew">새 노트</button>
+            <label>제목 변경<input id="feedbackNoteTitle" aria-label="노트 제목" maxlength="200" placeholder="노트 제목" disabled></label>
+            <button type="button" id="feedbackSave">지금 저장</button>
+            <button type="button" id="feedbackHistory">수정 이력</button>
+            <button type="button" id="feedbackExport">Markdown 내보내기</button>
+            <button type="button" id="feedbackArchive">노트 보관</button>
+          </div></details>
+          <details class="feedback-menu"><summary>보기</summary><div class="feedback-menu-panel">
+            <label>글자 크기<select id="feedbackFontSize" aria-label="노트 글자 크기"><option value="10">10px</option><option value="11">11px</option><option value="12">12px</option><option value="13">13px</option><option value="14">14px</option><option value="15">15px</option><option value="16">16px</option><option value="17">17px</option><option value="18">18px</option><option value="19">19px</option><option value="20" selected>20px</option><option value="21">21px</option><option value="22">22px</option><option value="23">23px</option><option value="24">24px</option></select></label>
+            <button type="button" id="feedbackPreview" aria-pressed="false">미리보기</button>
+          </div></details>
+          <details class="feedback-menu"><summary>편집</summary><div class="feedback-menu-panel">
+            <button type="button" data-feedback-prefix="## ">제목 삽입</button><button type="button" data-feedback-prefix="- ">목록 삽입</button><button type="button" data-feedback-prefix="- [ ] ">체크 항목 삽입</button>
+          </div></details>
+          <details class="feedback-menu"><summary aria-label="노트 검색 및 추가 정보">⋯</summary><div class="feedback-menu-panel">
+            <label>노트 검색<input id="feedbackNoteSearch" type="search" placeholder="제목 검색"></label>
+            <label class="feedback-checkbox"><input id="feedbackShowArchived" type="checkbox">보관된 노트 보기</label>
+            <p class="feedback-independence">프로젝트를 바꿔도 이 노트는 유지됩니다. 노트는 프로젝트와 별도로 저장됩니다.</p>
+            <span id="feedbackUpdatedAt"></span>
+          </div></details>
+        </div>
+        <div id="feedbackReadOnly" class="feedback-readonly" role="status" hidden><strong>보관된 노트 · 읽기 전용</strong><span>키보드로 입력하려면 먼저 보관을 해제하세요.</span><button type="button" id="feedbackEditArchived">보관 해제하고 편집</button></div>
+        <div id="feedbackConflict" class="feedback-conflict" role="alert" hidden>
+          <p>다른 화면에서 변경된 내용이 있습니다. 현재 초안은 보존했습니다.</p>
+          <button type="button" id="feedbackShowServer">서버 내용 확인</button><button type="button" id="feedbackCopyConflict">내 초안을 새 노트로 저장</button><button type="button" id="feedbackReloadServer">서버 버전 불러오기</button>
+        </div>
+        <textarea id="feedbackNoteBody" aria-label="피드백 본문" placeholder="영상을 보며 자유롭게 기록하세요.\n\n## 수정 요청\n- [ ] 수정 후 확인할 내용\n- [x] 반영 확인 완료" spellcheck="false" disabled></textarea>
+        <div id="feedbackNotePreview" class="feedback-note-preview" hidden></div>
+        <div class="feedback-note-footer"><span id="feedbackSaveStatus" role="status" aria-live="polite">노트를 선택하거나 파일 메뉴에서 새로 만드세요.</span></div>
+      </section>
+    </div>
+  </section>
 </main>
+<dialog id="compareHistoryDialog" aria-labelledby="compareHistoryTitle">
+  <div class="feedback-pane-head"><h3 id="compareHistoryTitle">프로젝트 비교 이력</h3><button type="button" id="compareHistoryClose">닫기</button></div>
+  <p id="compareHistoryStatus" role="status" aria-live="polite"></p>
+  <div id="compareHistoryList"></div>
+  <div class="feedback-pager"><button type="button" id="compareHistoryPrevious">이전</button><span id="compareHistoryPage"></span><button type="button" id="compareHistoryNext">다음</button></div>
+</dialog>
+<dialog id="feedbackHistoryDialog" class="feedback-history-dialog" aria-labelledby="feedbackHistoryTitle">
+  <div class="feedback-pane-head"><h3 id="feedbackHistoryTitle">노트 수정 이력</h3><button type="button" id="feedbackHistoryClose">닫기</button></div>
+  <select id="feedbackRevisionList" aria-label="저장 버전"></select>
+  <pre id="feedbackRevisionBody"></pre>
+  <button type="button" id="feedbackRestoreRevision">이 내용으로 복원 · 새 버전 저장</button>
+</dialog>
 <dialog id="h3PicturePreviewDialog" class="h3-picture-preview-dialog" aria-labelledby="h3PicturePreviewTitle" aria-describedby="h3PicturePreviewMeta">
   <div class="h3-candidate-video-head">
     <div>
@@ -372,7 +481,18 @@
   <div class="frame-annotation-stage"><canvas aria-label="프레임 그리기 영역"></canvas></div>
   <div class="frame-annotation-footer"><span data-status role="status" aria-live="polite"></span><a data-image target="_blank" rel="noopener" hidden>저장 이미지 보기</a><button type="button" data-server-version hidden>서버 기록 다시 열기</button><button type="button" data-prev>이전</button><button type="button" data-save>서버 저장</button><button type="button" data-next>저장 후 다음</button></div>
 </dialog>
-<script src="/app.js?v=20261003-108"></script>
-<script src="/frame-annotations.js?v=1"></script>
+<script src="/interaction-feedback.js?v=20261014-1"></script>
+<script src="/view-stability.js?v=20261020-2"></script>
+<script src="/sidebar.js?v=20261021-1"></script>
+<script src="/app.js?v=20261103-1"></script>
+<script src="/project-generation.js?v=20261102-1"></script>
+<script src="/queue-navigation.js?v=20261102-2"></script>
+<script src="/frame-annotations.js?v=2"></script>
+<script src="/feedback-splitter.js?v=20261021-2"></script>
+<script src="/feedback-notes.js?v=20261102-2"></script>
+<script src="/dual-playback.js?v=20261025-1"></script>
+<script src="/project-compare.js?v=20261102-1"></script>
+<script src="/selected-screening.js?v=20261031-1"></script>
+<script src="/music-library.js?v=20261022-2"></script>
 </body>
 </html>

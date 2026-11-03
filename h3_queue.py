@@ -22,7 +22,6 @@ import model_test_registry
 import model_test_r2v
 import workflow_adapter
 import h3_prompt_projects
-import h3_prompt_contract
 import action_assets
 from comfy_client import ComfyClient
 from job_queue import atomic_write_json, now_iso, queue_claim_lock, read_json, update_status
@@ -34,7 +33,7 @@ ACTIVE = {"claimed", "preparing", "uploading", "submitting", "submitted", "comfy
 R2V_OUTPUT_RESOLUTIONS = {
     (608, 352), (832, 480), (960, 544), (1280, 704), (1280, 736),
 }
-R2V_RERENDER_RESOLUTIONS = R2V_OUTPUT_RESOLUTIONS | {(1024, 576)}
+R2V_RERENDER_RESOLUTIONS = R2V_OUTPUT_RESOLUTIONS | {(1024, 576), (1344, 768)}
 I2V_OUTPUT_RESOLUTIONS = {(832, 480), (1280, 704), (1376, 768), (576, 1024)}
 H3_SOL_ATTN_DEFAULT_OVERRIDES = {
     "int8_qk": False,
@@ -51,13 +50,6 @@ EMBEDDING_EFFECT_PATTERN = re.compile(
 )
 
 
-def prompt_revision_authoring_config() -> dict[str, Any]:
-    """Return the non-secret prompt authoring mode exposed to the UI."""
-    remote_url = str(os.environ.get("H3_PROMPT_REVISION_REMOTE_URL") or "").strip()
-    return {
-        "mode": "remote_codex_api" if remote_url else "codex_conversation",
-        "remote_configured": bool(remote_url),
-    }
 
 
 def candidate_render_config() -> dict[str, Any]:
@@ -244,7 +236,6 @@ def roots(root: Path) -> dict[str, Path]:
         "base": base,
         "jobs": base / "jobs",
         "candidate_sets": base / "candidate_sets",
-        "prompt_revision_requests": base / "prompt_revision_requests",
         "project_test_sets": base / "project_test_sets",
         "test_queues": base / "test_queues",
         "outputs": base / "outputs",
@@ -949,7 +940,6 @@ def enqueue_candidate_set(
         "prompt_variants": prompt_variants if independent_prompts else [],
         "independent_prompts": independent_prompts,
         **legacy_version_metadata,
-        "revision_feedback": str(data.get("revision_feedback") or "").strip() or None,
         "parent_candidate_set_id": str(data.get("parent_candidate_set_id") or "").strip() or None,
         "adapter_id": effective_adapter_id, "candidate_count": count, "candidate_job_ids": job_ids,
         "width": width, "height": height,
@@ -1016,7 +1006,7 @@ def enqueue_selected_candidate_rerender(
     if (width, height) not in R2V_RERENDER_RESOLUTIONS:
         raise ValueError(
             "재생성 해상도는 608 × 352, 832 × 480, 960 × 544, "
-            "1024 × 576, 1280 × 704 또는 1280 × 736 중에서 선택하세요."
+            "1024 × 576, 1280 × 704, 1280 × 736 또는 1344 × 768 중에서 선택하세요."
         )
     source_width = int(source_request.get("width") or 0)
     source_height = int(source_request.get("height") or 0)
@@ -1486,411 +1476,14 @@ def requeue_candidate_set(root: Path, candidate_set_id: str) -> dict[str, Any]:
     }
 
 
-def list_prompt_revision_requests(root: Path) -> list[dict[str, Any]]:
-    base = roots(root)["prompt_revision_requests"]
-    candidate_sets = roots(root)["candidate_sets"]
-    if not base.exists():
-        return []
-    rows = []
-    for directory in (path for path in base.iterdir() if path.is_dir()):
-        payload = read_json(directory / "request.json", {}) or {}
-        if payload:
-            row = dict(payload)
-            authored_payload = read_json(
-                directory / "authored_variants.json", {}
-            ) or {}
-            authored_variants = (
-                authored_payload.get("prompt_variants")
-                if isinstance(authored_payload, dict)
-                else None
-            )
-            if isinstance(authored_variants, list) and authored_variants:
-                row["authored_prompt_variants"] = authored_variants
-                row["authored_variant_ids"] = [
-                    str(item.get("variant_id") or "")
-                    for item in authored_variants
-                    if isinstance(item, dict)
-                ]
-                row["authored_draft_available"] = True
-            else:
-                row["authored_prompt_variants"] = []
-                row["authored_variant_ids"] = []
-                row["authored_draft_available"] = False
-
-            result_set_id = str(row.get("result_candidate_set_id") or "")
-            result_set = (
-                read_json(
-                    candidate_sets / result_set_id / "candidate_set.json", {}
-                ) or {}
-                if result_set_id
-                else {}
-            )
-            row["result_candidate_set_deleted"] = bool(
-                result_set and _candidate_set_deleted(result_set)
-            )
-            row["result_candidate_set_status"] = (
-                str(result_set.get("status") or "") or None
-            )
-            row["result_clip_version"] = (
-                int(result_set.get("clip_version") or 0) or None
-            )
-            row["result_candidate_round"] = (
-                int(result_set.get("candidate_round") or 0) or None
-            )
-            rows.append(row)
-    return sorted(
-        rows,
-        key=lambda row: str(row.get("updated_at") or row.get("created_at") or ""),
-        reverse=True,
-    )
 
 
-def update_prompt_revision_request(
-    root: Path,
-    prompt_revision_request_id: str,
-    updates: dict[str, Any],
-    *,
-    expected_statuses: set[str] | None = None,
-) -> dict[str, Any]:
-    """Atomically update dispatcher metadata without bypassing request ownership."""
-    request_id = _safe_id(prompt_revision_request_id, "프롬프트 수정 요청 ID")
-    base = roots(root)["prompt_revision_requests"]
-    request_path = base / request_id / "request.json"
-    with queue_claim_lock(base):
-        payload = read_json(request_path, {}) or {}
-        if not payload:
-            raise FileNotFoundError(f"프롬프트 수정 요청을 찾을 수 없습니다: {request_id}")
-        current = str(payload.get("status") or "")
-        if expected_statuses is not None and current not in expected_statuses:
-            raise ValueError(
-                f"프롬프트 수정 요청 상태가 변경되었습니다: {current or 'missing'}"
-            )
-        safe_updates = {
-            key: value
-            for key, value in updates.items()
-            if key not in {
-                "prompt_revision_request_id",
-                "source_candidate_set_id",
-                "source_prompt_variants",
-                "clip_context",
-                "feedback",
-                "expected_variant_ids",
-                "created_at",
-            }
-        }
-        payload.update(safe_updates, updated_at=now_iso())
-        atomic_write_json(request_path, payload)
-        return payload
 
 
-def _source_revision_context(
-    root: Path,
-    source_set: dict[str, Any],
-    source_requests: list[dict[str, Any]],
-) -> dict[str, Any]:
-    source_request = source_requests[0]
-    context: dict[str, Any] = {
-        "project_id": source_set.get("source_project_id"),
-        "scene_id": source_set.get("source_scene_id"),
-        "clip_id": source_set.get("source_clip_id"),
-        "duration_seconds": source_request.get("duration_seconds"),
-        "references": [
-            {
-                "picture_index": row.get("picture_index"),
-                "role": row.get("role"),
-                "sha256": row.get("sha256"),
-            }
-            for row in source_request.get("references") or []
-        ],
-    }
-    try:
-        if source_set.get("source_project_id") and source_set.get("source_clip_id"):
-            clip = h3_prompt_projects.load_clip(
-                root,
-                str(source_set["source_project_id"]),
-                str(source_set["source_clip_id"]),
-            )
-            for key in (
-                "continuity_in", "continuity_out", "event_state_in",
-                "event_state_out", "screen_direction", "summary",
-                "before_state", "after_state", "world_action_axis",
-                "scenario_ko", "required_dialogue", "action_requirements",
-            ):
-                if clip.get(key) is not None:
-                    context[key] = clip[key]
-            context["reference_contract"] = [
-                {
-                    "picture_index": row.get("picture_index"),
-                    "role": row.get("role"),
-                    "label": row.get("label"),
-                    "description": row.get("description"),
-                }
-                for row in clip.get("references") or []
-            ]
-    except (FileNotFoundError, ValueError):
-        pass
-    return context
 
 
-def save_prompt_revision_request(
-    root: Path, candidate_set_id: str, data: dict[str, Any]
-) -> dict[str, Any]:
-    """Persist feedback for later Codex authoring without running any model."""
-    paths = roots(root)
-    set_id = _safe_id(candidate_set_id, "후보 세트 ID")
-    source_path = paths["candidate_sets"] / set_id / "candidate_set.json"
-    feedback = str(data.get("feedback") or "").strip()
-    if len(feedback) < 3 or len(feedback) > 4000:
-        raise ValueError("수정 의견은 3~4,000자로 입력하세요.")
-
-    with queue_claim_lock(paths["prompt_revision_requests"]):
-        source_set = read_json(source_path, {}) or {}
-        if not source_set or _candidate_set_deleted(source_set):
-            raise FileNotFoundError(f"H3 후보 세트를 찾을 수 없습니다: {set_id}")
-        if source_set.get("render_purpose") == "resolution_rerender":
-            raise ValueError("해상도 재생성 결과에는 수정 의견을 저장할 수 없습니다.")
-        if str(source_set.get("generation_mode") or "r2v") != "r2v":
-            raise ValueError("프롬프트 수정 의견 저장은 현재 H3 R2V만 지원합니다.")
-        job_ids = list(source_set.get("candidate_job_ids") or [])
-        if len(job_ids) != 3 or source_set.get("independent_prompts") is not True:
-            raise ValueError("독립 프롬프트 후보 3개가 있는 버전에서만 수정 의견을 저장할 수 있습니다.")
-        statuses = [
-            str((read_json(paths["jobs"] / job_id / "status.json", {}) or {}).get("status") or "missing")
-            for job_id in job_ids
-        ]
-        if any(status not in TERMINAL for status in statuses):
-            raise ValueError("현재 후보 3개의 생성이 모두 끝난 뒤 수정 의견을 저장할 수 있습니다.")
-
-        source_requests = [
-            read_json(paths["jobs"] / job_id / "request.json", {}) or {}
-            for job_id in job_ids
-        ]
-        source_variants = list(source_set.get("prompt_variants") or [])
-        if len(source_variants) != 3:
-            source_variants = [
-                {
-                    "variant_id": request.get("prompt_variant_id") or _candidate_letter(index),
-                    "label": request.get("prompt_variant_label") or f"후보 {_candidate_letter(index)}",
-                    "rationale": request.get("prompt_variant_rationale") or "",
-                    "video_prompt": request.get("prompt") or "",
-                }
-                for index, request in enumerate(source_requests, start=1)
-            ]
-        next_round = int(source_set.get("candidate_round") or 1) + 1
-        expected_variant_ids = [
-            _candidate_letter((next_round - 1) * 3 + offset)
-            for offset in range(1, 4)
-        ]
-        remote_authoring = prompt_revision_authoring_config()["remote_configured"]
-        pending_statuses = (
-            {
-                "awaiting_codex_authoring",
-                "awaiting_remote_authoring",
-                "remote_authoring_failed",
-            }
-            if remote_authoring
-            else {"awaiting_codex_authoring"}
-        )
-        existing = next(
-            (
-                row for row in list_prompt_revision_requests(root)
-                if row.get("source_candidate_set_id") == set_id
-                and row.get("status") in pending_statuses
-            ),
-            None,
-        )
-        remote_in_progress = next(
-            (
-                row for row in list_prompt_revision_requests(root)
-                if row.get("source_candidate_set_id") == set_id
-                and row.get("status") == "remote_authoring_in_progress"
-            ),
-            None,
-        )
-        if remote_in_progress:
-            raise ValueError("원격 PC가 현재 이 수정 의견으로 후보 프롬프트를 작성 중입니다.")
-        stamp = now_iso()
-        request_id = (
-            str(existing.get("prompt_revision_request_id"))
-            if existing
-            else f"h3rev_{datetime.now():%Y%m%d_%H%M%S}_{secrets.token_hex(3)}"
-        )
-        request_payload = {
-            "schema_version": 1,
-            "prompt_revision_request_id": request_id,
-            "status": (
-                "awaiting_remote_authoring"
-                if remote_authoring
-                else "awaiting_codex_authoring"
-            ),
-            "authoring_mode": (
-                "remote_codex_api" if remote_authoring else "codex_conversation"
-            ),
-            "local_model_execution": False,
-            "source_candidate_set_id": set_id,
-            "source_project_id": source_set.get("source_project_id"),
-            "source_scene_id": source_set.get("source_scene_id"),
-            "source_clip_id": source_set.get("source_clip_id"),
-            "source_clip_version": source_set.get("clip_version"),
-            "source_candidate_round": source_set.get("candidate_round") or 1,
-            "next_candidate_round": next_round,
-            "expected_variant_ids": expected_variant_ids,
-            "feedback": feedback,
-            "source_prompt_variants": source_variants,
-            "clip_context": _source_revision_context(
-                root, source_set, source_requests
-            ),
-            "created_at": existing.get("created_at") if existing else stamp,
-            "updated_at": stamp,
-            "result_candidate_set_id": None,
-            "applied_at": None,
-            "remote_attempts": int(existing.get("remote_attempts") or 0) if existing else 0,
-            "remote_error": None,
-            "next_retry_at": None,
-        }
-        request_dir = paths["prompt_revision_requests"] / request_id
-        request_dir.mkdir(parents=True, exist_ok=True)
-        atomic_write_json(request_dir / "request.json", request_payload)
-
-        revision_ids = list(source_set.get("prompt_revision_request_ids") or [])
-        if request_id not in revision_ids:
-            revision_ids.append(request_id)
-        source_set.update(
-            pending_prompt_revision_request_id=request_id,
-            prompt_revision_request_ids=revision_ids,
-            updated_at=stamp,
-        )
-        atomic_write_json(source_path, source_set)
-    return {**request_payload, "feedback_updated": bool(existing), "jobs_created": 0}
 
 
-def apply_authored_prompt_revision(
-    root: Path, prompt_revision_request_id: str, data: dict[str, Any]
-) -> dict[str, Any]:
-    """Queue Codex-authored prompts after validating the saved feedback contract."""
-    paths = roots(root)
-    request_id = _safe_id(prompt_revision_request_id, "프롬프트 수정 요청 ID")
-    request_path = paths["prompt_revision_requests"] / request_id / "request.json"
-    request_payload = read_json(request_path, {}) or {}
-    if not request_payload:
-        raise FileNotFoundError(f"프롬프트 수정 요청을 찾을 수 없습니다: {request_id}")
-    if request_payload.get("status") not in {
-        "awaiting_codex_authoring",
-        "awaiting_remote_authoring",
-        "remote_authoring_in_progress",
-    }:
-        raise ValueError("작성 대기 또는 원격 작성 중인 프롬프트 수정 요청이 아닙니다.")
-
-    source_id = _safe_id(
-        str(request_payload.get("source_candidate_set_id") or ""),
-        "원본 후보 세트 ID",
-    )
-    source_path = paths["candidate_sets"] / source_id / "candidate_set.json"
-    source_set = read_json(source_path, {}) or {}
-    if not source_set or _candidate_set_deleted(source_set):
-        raise FileNotFoundError(f"원본 H3 후보 세트를 찾을 수 없습니다: {source_id}")
-    authored = h3_prompt_projects.normalize_prompt_variants(
-        data.get("prompt_variants")
-    )
-    if len(authored) != 3:
-        raise ValueError("대화에서 작성한 전체 프롬프트는 정확히 3개여야 합니다.")
-    expected_ids = list(request_payload.get("expected_variant_ids") or [])
-    if [row["variant_id"] for row in authored] != expected_ids:
-        raise ValueError(
-            "작성 후보 ID가 저장된 다음 순번과 다릅니다: "
-            + ", ".join(expected_ids)
-        )
-    if len({row["video_prompt"] for row in authored}) != 3:
-        raise ValueError("작성한 후보 3개의 전체 프롬프트가 서로 달라야 합니다.")
-
-    job_ids = list(source_set.get("candidate_job_ids") or [])
-    if len(job_ids) != 3:
-        raise ValueError("원본 후보 세트의 렌더 작업 3개를 찾을 수 없습니다.")
-    source_request = read_json(paths["jobs"] / job_ids[0] / "request.json", {}) or {}
-    duration_seconds = float(source_request.get("duration_seconds") or 0)
-    detailed_descriptions = {
-        h3_prompt_projects.extract_detailed_description(row["video_prompt"])
-        for row in authored
-    }
-    if len(detailed_descriptions) != 3:
-        raise ValueError("작성 후보 3개는 detailed_description 연출부터 서로 달라야 합니다.")
-    for row in authored:
-        report = h3_prompt_contract.validate_prompt(
-            row["video_prompt"], duration_seconds=duration_seconds
-        )
-        if not report.valid:
-            reasons = "; ".join(issue.message for issue in report.errors[:5])
-            raise ValueError(
-                f"후보 {row['variant_id']}가 새 H3 프롬프트 계약을 통과하지 못했습니다: "
-                + reasons
-            )
-    source_references = list(source_request.get("references") or [])
-    references = []
-    for index, reference in enumerate(source_references, start=1):
-        reference_path = Path(str(reference.get("source_path") or ""))
-        if not reference_path.is_file():
-            raise FileNotFoundError(f"원본 후보군의 Picture {index} 파일을 찾을 수 없습니다.")
-        if _sha256(reference_path) != str(reference.get("sha256") or ""):
-            raise ValueError(f"원본 후보군의 Picture {index} 파일 해시가 변경되었습니다.")
-        references.append({
-            "upload_path": str(reference_path),
-            "role": reference.get("role"),
-            "original_name": reference.get("original_name"),
-        })
-
-    revised = enqueue_candidate_set(
-        root,
-        {
-            "adapter_id": source_request.get("adapter_id"),
-            "generation_mode": "r2v",
-            "prompt_variants": authored,
-            "references": references,
-            "candidate_count": 3,
-            "seed": -1,
-            "width": int(source_request.get("width") or 1280),
-            "height": int(source_request.get("height") or 704),
-            "duration_seconds": float(source_request.get("duration_seconds") or 5),
-            "workflow_settings": source_request.get("workflow_settings"),
-            "source_project_id": source_request.get("source_project_id"),
-            "source_scene_id": source_request.get("source_scene_id"),
-            "source_clip_id": source_request.get("source_clip_id"),
-            "project_test_set_id": source_request.get("project_test_set_id"),
-            "comfy_url": source_request.get("comfy_url"),
-            "candidate_round": int(request_payload.get("next_candidate_round") or 1),
-            "revision_feedback": request_payload.get("feedback"),
-            "parent_candidate_set_id": source_id,
-        },
-        lineage={
-            "render_purpose": "feedback_revision",
-            "source_candidate_set_id": source_id,
-        },
-        reference_provenance=source_references,
-    )
-    stamp = now_iso()
-    authored_by = str(data.get("authored_by") or request_payload.get("authoring_mode") or "codex_conversation")
-    if authored_by not in {"codex_conversation", "remote_codex_api"}:
-        authored_by = "codex_conversation"
-    request_payload.update(
-        status="applied_and_queued",
-        result_candidate_set_id=revised["candidate_set_id"],
-        applied_at=stamp,
-        updated_at=stamp,
-        authored_by=authored_by,
-        remote_error=None,
-        next_retry_at=None,
-    )
-    atomic_write_json(request_path, request_payload)
-    source_set.update(
-        pending_prompt_revision_request_id=None,
-        applied_prompt_revision_request_id=request_id,
-        updated_at=stamp,
-    )
-    atomic_write_json(source_path, source_set)
-    return {
-        **revised,
-        "prompt_revision_request_id": request_id,
-        "authored_by": authored_by,
-    }
 
 
 def restore_candidate_version(root: Path, candidate_set_id: str) -> dict[str, Any]:
@@ -2514,60 +2107,22 @@ def queue_project_test_set(root: Path, project_test_set_id: str, data: dict[str,
     return payload
 
 
-def _latest_authored_scene_prompt(
-    revision_requests: list[dict[str, Any]],
-    project_id: str,
-    scene_id: str,
-    clip_id: str,
-) -> dict[str, Any] | None:
-    matches = [
-        row
-        for row in revision_requests
-        if row.get("authored_draft_available")
-        and str(row.get("source_project_id") or "") == project_id
-        and str(row.get("source_scene_id") or "") == scene_id
-        and str(row.get("source_clip_id") or "") == clip_id
-        and len(row.get("authored_prompt_variants") or []) == 3
-    ]
-    if not matches:
-        return None
-    matches.sort(
-        key=lambda row: (
-            int(
-                row.get("result_clip_version")
-                or row.get("next_candidate_round")
-                or 0
-            ),
-            str(row.get("updated_at") or row.get("applied_at") or ""),
-            str(row.get("prompt_revision_request_id") or ""),
-        ),
-        reverse=True,
-    )
-    selected = matches[0]
-    return {
-        "prompt_variants": list(selected["authored_prompt_variants"]),
-        "prompt_revision_request_id": str(
-            selected.get("prompt_revision_request_id") or ""
-        ),
-        "clip_version": int(
-            selected.get("result_clip_version")
-            or selected.get("next_candidate_round")
-            or 0
-        ),
-        "candidate_round": int(
-            selected.get("result_candidate_round")
-            or selected.get("next_candidate_round")
-            or 0
-        ),
-        "variant_ids": [
-            str(row.get("variant_id") or "")
-            for row in selected["authored_prompt_variants"]
-        ],
-    }
 
 
 def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, Any]:
     """Queue one independent candidate set for every ready clip in a scene."""
+    return _enqueue_scoped_candidate_sets(root, data, whole_project=False)
+
+
+def enqueue_project_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, Any]:
+    """Queue every R2V project clip after a complete project-wide preflight."""
+    return _enqueue_scoped_candidate_sets(root, data, whole_project=True)
+
+
+def _enqueue_scoped_candidate_sets(
+    root: Path, data: dict[str, Any], *, whole_project: bool
+) -> dict[str, Any]:
+    scope_name = "프로젝트" if whole_project else "씬"
     queue_lane = str(data.get("queue_lane") or "windows_candidate").strip()
     if queue_lane not in {"windows_candidate", "local_generation"}:
         raise ValueError("H3 생성 큐는 Windows 후보 또는 로컬 생성이어야 합니다.")
@@ -2575,7 +2130,7 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
     blocked_reason = h3_prompt_projects.project_generation_block_reason(root, project_id)
     if blocked_reason:
         raise ValueError(blocked_reason)
-    scene_id = _safe_id(str(data.get("scene_id") or ""), "H3 씬 ID")
+    scene_id = "" if whole_project else _safe_id(str(data.get("scene_id") or ""), "H3 씬 ID")
     adapter_id = str(data.get("adapter_id") or "").strip()
     if not adapter_id:
         raise ValueError("H3 워크플로우를 선택하세요.")
@@ -2590,6 +2145,8 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
     ).strip().lower()
     if generation_mode not in {"r2v", "i2v"}:
         raise ValueError("H3 생성 방식은 R2V 또는 I2V여야 합니다.")
+    if whole_project and generation_mode != "r2v":
+        raise ValueError("프로젝트 전체 생성은 01 R2V 프로젝트만 지원합니다.")
     allowed_resolutions = (
         I2V_OUTPUT_RESOLUTIONS
         if generation_mode == "i2v"
@@ -2607,13 +2164,16 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
         )
     if overview.get("generation_mode") not in {None, generation_mode}:
         raise ValueError("선택한 프로젝트와 H3 생성 방식이 일치하지 않습니다.")
-    scene = next(
-        (row for row in overview.get("scenes") or [] if str(row.get("scene_id") or "") == scene_id),
-        None,
-    )
-    if not scene:
-        raise FileNotFoundError(f"H3 씬을 찾을 수 없습니다: {scene_id}")
-    clips = list(scene.get("clips") or [])
+    if whole_project:
+        clips = list(overview.get("clips") or [])
+    else:
+        scene = next(
+            (row for row in overview.get("scenes") or [] if str(row.get("scene_id") or "") == scene_id),
+            None,
+        )
+        if not scene:
+            raise FileNotFoundError(f"H3 씬을 찾을 수 없습니다: {scene_id}")
+        clips = list(scene.get("clips") or [])
     if not clips:
         raise ValueError("후보군으로 등록할 H3 클립이 없습니다.")
     blocked = [clip for clip in clips if not clip.get("ready")]
@@ -2622,7 +2182,7 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
             f"{clip.get('clip_id')}: {'; '.join(clip.get('errors') or ['준비되지 않음'])}"
             for clip in blocked[:5]
         )
-        raise ValueError(f"준비되지 않은 클립 {len(blocked)}개가 있어 씬 등록을 중단했습니다. {details}")
+        raise ValueError(f"준비되지 않은 클립 {len(blocked)}개가 있어 {scope_name} 등록을 중단했습니다. {details}")
     prompt_sources = [
         {"clip_id": clip["clip_id"], "source": "project_prompt"}
         for clip in clips
@@ -2669,7 +2229,7 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
             preflight_errors.append(f"{clip.get('clip_id')}: {exc}")
     if preflight_errors:
         raise ValueError(
-            "씬 전체 사전검사에 실패하여 아무 후보군도 등록하지 않았습니다. "
+            f"{scope_name} 전체 사전검사에 실패하여 아무 후보군도 등록하지 않았습니다. "
             + "; ".join(preflight_errors[:5])
         )
     candidate_sets = []
@@ -2692,7 +2252,7 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
                 "height": height,
                 "workflow_settings": data.get("workflow_settings"),
                 "source_project_id": project_id,
-                "source_scene_id": scene_id,
+                "source_scene_id": clip["scene_id"] if whole_project else scene_id,
                 "source_clip_id": clip["clip_id"],
                 "references": [{
                     "role": row.get("role"),
@@ -2704,13 +2264,13 @@ def enqueue_scene_candidate_sets(root: Path, data: dict[str, Any]) -> dict[str, 
     except Exception as exc:
         if candidate_sets:
             raise RuntimeError(
-                f"씬 후보군을 {len(candidate_sets)}/{len(clips)}클립까지 등록한 뒤 실패했습니다: {exc}"
+                f"{scope_name} 후보군을 {len(candidate_sets)}/{len(clips)}클립까지 등록한 뒤 실패했습니다: {exc}"
             ) from exc
         raise
     candidate_set_ids = [row["candidate_set_id"] for row in candidate_sets]
     return {
         "project_id": project_id,
-        "scene_id": scene_id,
+        **({"scene_count": len({clip["scene_id"] for clip in clips})} if whole_project else {"scene_id": scene_id}),
         "clip_count": len(clips),
         "candidate_count": candidate_count,
         "job_count": len(clips) * candidate_count,
@@ -3069,7 +2629,23 @@ def _candidate_filters(
         })
         for project in projects
     }
-    return {"projects": projects, "scenes_by_project": scenes_by_project}
+    clips_by_project_scene: dict[str, dict[str, list[str]]] = {}
+    for payload, row in zip(payloads, rows):
+        clip = str(payload.get("source_clip_id") or "").strip()
+        if clip:
+            group = clips_by_project_scene.setdefault(row["project_id"], {}).setdefault(row["scene_id"], [])
+            if clip not in group:
+                group.append(clip)
+    episodes_by_project = {}
+    project_root = h3_prompt_projects.projects_root(paths["base"].parents[1])
+    for project in projects:
+        manifest = read_json(project_root / project / "manifest.json", {}) if Path(project).name == project else {}
+        pattern = r"(?:^|[_\s-])EP(\d+)(?=[A-Z_\s-]|$)"
+        match = re.search(pattern, project, re.I) or re.search(pattern, str((manifest or {}).get("title") or ""), re.I)
+        episodes_by_project[project] = f"EP{int(match[1]):02d}" if match else "__other__"
+    episodes = sorted(set(episodes_by_project.values()), key=lambda value: (value == "__other__", int(value[2:]) if value != "__other__" else 0))
+    return {"projects": projects, "scenes_by_project": scenes_by_project, "clips_by_project_scene": clips_by_project_scene,
+            "episodes": episodes, "episodes_by_project": episodes_by_project}
 
 
 def _page_values(data: dict[str, Any], total: int) -> tuple[int, int, int, int]:
@@ -3080,16 +2656,21 @@ def _page_values(data: dict[str, Any], total: int) -> tuple[int, int, int, int]:
 
 
 def _filter_candidate_sets(
-    paths: dict[str, Path], payloads: list[dict[str, Any]], data: dict[str, Any]
+    paths: dict[str, Path], payloads: list[dict[str, Any]], data: dict[str, Any], filters: dict[str, Any] | None = None
 ) -> list[dict[str, Any]]:
+    episode = str(data.get("episode") or "").strip()
+    episode_map = (filters or _candidate_filters(paths, payloads)).get("episodes_by_project", {}) if episode else {}
     project = str(data.get("project_id") or "").strip()
     scene = str(data.get("scene_id") or "").strip()
+    clip = str(data.get("clip_id") or "").strip()
     return [
         payload
         for payload in payloads
         if (
             (not project or _candidate_source(paths, payload)[0] == project)
+            and (not episode or episode_map.get(_candidate_source(paths, payload)[0]) == episode)
             and (not scene or _candidate_source(paths, payload)[1] == scene)
+            and (not clip or str(payload.get("source_clip_id") or "") == clip)
         )
     ]
 
@@ -3102,7 +2683,8 @@ def candidate_page(root: Path, data: dict[str, Any]) -> dict[str, Any]:
         if payload.get("render_purpose") != "resolution_rerender"
         and not payload.get("hidden_from_candidate_page")
     ]
-    filtered = _filter_candidate_sets(paths, source_sets, data)
+    filters = _candidate_filters(paths, source_sets)
+    filtered = _filter_candidate_sets(paths, source_sets, data, filters)
     page, page_size, total_pages, start = _page_values(data, len(filtered))
     page_sets = filtered[start:start + page_size]
     job_ids = {
@@ -3125,7 +2707,7 @@ def candidate_page(root: Path, data: dict[str, Any]) -> dict[str, Any]:
             "start": start + 1 if filtered else 0,
             "end": min(start + page_size, len(filtered)),
         },
-        "filters": _candidate_filters(paths, source_sets),
+        "filters": filters,
     }
 
 
@@ -3260,7 +2842,21 @@ def results_page(root: Path, data: dict[str, Any]) -> dict[str, Any]:
         if payload.get("render_purpose") != "resolution_rerender"
         and _candidate_selected_jobs(payload)
     ]
-    filtered = _filter_candidate_sets(paths, source_sets, data)
+    filters = _candidate_filters(paths, source_sets)
+    filtered = _filter_candidate_sets(paths, source_sets, data, filters)
+    # The count is per selected source job and follows the same visible-history policy as 05.
+    rerenders_by_source: dict[str, list[dict[str, Any]]] = {}
+    for payload in all_sets:
+        if payload.get("render_purpose") != "resolution_rerender":
+            continue
+        if any(
+            str((read_json(paths["jobs"] / str(job_id) / "status.json", {}) or {})
+                .get("status") or "missing") not in {"failed", "cancelled"}
+            for job_id in payload.get("candidate_job_ids") or []
+        ):
+            source = str(payload.get("source_selected_job_id") or "")
+            rerenders_by_source.setdefault(source, []).append(payload)
+    count_filter = str(data.get("rerender_count") or "").strip()
     selections = sorted(
         (
             (payload, selection)
@@ -3272,7 +2868,35 @@ def results_page(root: Path, data: dict[str, Any]) -> dict[str, Any]:
         ),
         reverse=True,
     )
+    if count_filter in {"0", "1", "2", "3", "4", "5", "n"}:
+        selections = [
+            (payload, selection) for payload, selection in selections
+            if (len(rerenders_by_source.get(str(selection["job_id"]), [])) >= 6
+                if count_filter == "n" else
+                len(rerenders_by_source.get(str(selection["job_id"]), [])) == int(count_filter))
+        ]
+    sort_by = "name" if data.get("sort_by") == "name" else "recent"
+    if sort_by == "name":
+        def natural(value):
+            return tuple((1, int(part)) if part.isdigit() else (0, part.casefold()) for part in re.split(r"(\d+)", str(value or "")))
+
+        def name_key(row):
+            payload, selection = row
+            request = read_json(paths["jobs"] / str(selection["job_id"]) / "request.json", {}) or {}
+            project, scene = _candidate_source(paths, payload)
+            return (natural(payload.get("source_clip_id") or request.get("source_clip_id") or payload["candidate_set_id"]),
+                    natural(project), natural(scene), natural(request.get("candidate_index") or 0), natural(selection["job_id"]))
+
+        selections.sort(key=name_key)
     page, page_size, total_pages, start = _page_values(data, len(selections))
+    focus_job_id = str(data.get("focus_job_id") or "").strip()
+    focus_index = next(
+        (index for index, (_, selection) in enumerate(selections)
+         if str(selection["job_id"]) == focus_job_id), None
+    ) if focus_job_id else None
+    if focus_index is not None:
+        page = focus_index // page_size + 1
+        start = (page - 1) * page_size
     page_selections = selections[start:start + page_size]
     selected_job_ids = {str(selection["job_id"]) for _, selection in page_selections}
     page_sets: list[dict[str, Any]] = []
@@ -3302,21 +2926,8 @@ def results_page(root: Path, data: dict[str, Any]) -> dict[str, Any]:
             if width * height > source_width * source_height
         }
         page_sets.append(clone)
-    rerenders = [
-        payload for payload in all_sets
-        if payload.get("render_purpose") == "resolution_rerender"
-        and str(payload.get("source_selected_job_id") or "") in selected_job_ids
-        and any(
-            str(
-                (
-                    read_json(paths["jobs"] / str(job_id) / "status.json", {})
-                    or {}
-                ).get("status")
-                or "missing"
-            ) not in {"failed", "cancelled"}
-            for job_id in payload.get("candidate_job_ids") or []
-        )
-    ]
+    rerenders = [payload for source, records in rerenders_by_source.items()
+                 if source in selected_job_ids for payload in records]
     job_ids = set(selected_job_ids)
     for payload in rerenders:
         job_ids.update(str(value) for value in payload.get("candidate_job_ids") or [])
@@ -3331,6 +2942,11 @@ def results_page(root: Path, data: dict[str, Any]) -> dict[str, Any]:
             ):
                 job_ids.add(directory.name)
     return {
+        **({"focus": {"job_id": focus_job_id, "found": focus_index is not None}}
+           if focus_job_id else {}),
+        "rerender_count_filter": count_filter,
+        "sort_by": sort_by,
+        "selection_order": [str(selection["job_id"]) for _, selection in page_selections],
         "candidate_sets": page_sets + [
             _compact_candidate_set(payload) for payload in rerenders
         ],
@@ -3343,12 +2959,13 @@ def results_page(root: Path, data: dict[str, Any]) -> dict[str, Any]:
             "page": page,
             "page_size": page_size,
             "total": len(selections),
-            "total_sets": len(filtered),
+            "total_sets": len({payload["candidate_set_id"] for payload, _ in selections}),
+            "total_projects": len({_candidate_source(paths, payload)[0] for payload, _ in selections}),
             "total_pages": total_pages,
             "start": start + 1 if selections else 0,
             "end": min(start + page_size, len(selections)),
         },
-        "filters": _candidate_filters(paths, source_sets),
+        "filters": filters,
     }
 
 
@@ -3413,7 +3030,6 @@ def state(root: Path, *, compact: bool = False) -> dict[str, Any]:
             [_compact_candidate_set(payload) for payload in candidate_sets]
             if compact else candidate_sets
         ),
-        "prompt_revision_requests": list_prompt_revision_requests(root),
         "project_test_sets": list_project_test_sets(root),
         "test_queues": reconcile_test_queues(root),
         "worker": read_json(paths["worker_status"], {}) or {},
@@ -3423,7 +3039,6 @@ def state(root: Path, *, compact: bool = False) -> dict[str, Any]:
                 paths["windows_candidate_worker_status"], {}
             ) or {},
         },
-        "prompt_authoring": prompt_revision_authoring_config(),
         "candidate_render": candidate_render_config(),
     }
 

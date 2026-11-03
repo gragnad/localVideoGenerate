@@ -1,0 +1,10 @@
+#sidebarToggle{flex-shrink:0;min-height:44px;font-size:14px;padding:8px 12px}
+main>header{gap:12px}main>header>div{flex:1;min-width:0}
+body.studio-sidebar-collapsed #studioSidebar{position:fixed;transform:translateX(-100%);visibility:hidden;pointer-events:none}
+body.studio-sidebar-collapsed main,body.studio-feedback-layout main{margin-left:0;width:100%}
+body.studio-feedback-layout #studioSidebar{position:fixed;inset:0 auto 0 0;width:245px;height:100dvh;padding:24px 18px;gap:24px;z-index:101;background:#0c1018}
+body.studio-feedback-layout #studioSidebar .brand,body.studio-feedback-layout #studioSidebar .sidebar-footer{display:block}
+body.studio-feedback-layout #studioSidebar nav{display:grid;grid-template-columns:1fr;overflow:visible;gap:6px}
+body.studio-feedback-layout #studioSidebar nav button{width:100%;white-space:normal}
+#sidebarBackdrop{position:fixed;inset:0;z-index:100;background:#0009;border:0;border-radius:0;width:100%;height:100%;padding:0}
+@media(max-width:600px){main>header{flex-wrap:wrap}main>header small{display:none}#sidebarToggle{font-size:12px}}

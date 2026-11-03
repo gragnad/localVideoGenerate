@@ -1,0 +1,17 @@
+/* 05 only: field row and action row must fit the available content width, not the viewport. */
+.h3-source-filters:not(.h3-result-filters){grid-template-columns:repeat(3,minmax(0,1fr))}
+.h3-source-filters>div:first-child{grid-column:1/-1}
+.h3-source-filters select,.h3-source-filters button{min-height:48px;min-width:0}
+.h3-source-filters label{min-width:0}
+.h3-result-source-label{display:block;color:var(--accent);font-size:13px;margin-top:5px}
+.compare-project-filter{display:grid;gap:6px;min-width:0}
+.compare-project-filter select{min-height:48px}
+@media(max-width:700px){.h3-source-filters:not(.h3-result-filters){grid-template-columns:minmax(0,1fr)}}
+.h3-source-filters.h3-result-filters{grid-template-columns:repeat(3,minmax(0,1fr));min-width:0}
+.h3-result-filters>.h3-result-filter-heading{grid-column:1/-1}
+.h3-result-filters>label{min-width:0}
+.h3-result-filters select{width:100%;min-width:0;min-height:44px}
+.h3-result-filters>.h3-result-filter-actions{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+.h3-result-filters .h3-result-filter-actions button{min-width:0;min-height:44px;width:auto;white-space:normal;margin:0}
+@media(max-width:700px){.h3-source-filters.h3-result-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.h3-result-filters>label:last-of-type{grid-column:1/-1}}
+@media(max-width:420px){.h3-source-filters.h3-result-filters{grid-template-columns:minmax(0,1fr)}.h3-result-filters .h3-result-filter-actions button{flex:1 1 120px}}

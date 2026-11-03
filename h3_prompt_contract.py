@@ -78,6 +78,120 @@ ABSTRACT_STYLE_RE = re.compile(
 )
 
 
+# Writing-style findings from the H3-Context-IR comparisons (EP07-B1 v3~v5, 2026-10-19~21).
+# They are warnings only: they never block a prompt, and prompts written by IR itself are passthrough.
+IR_STYLE_PATTERNS = (
+    ("style_hard_cut", re.compile(r"\bhard cut to\b", re.IGNORECASE),
+     "'hard cut to' 대신 'the shot cuts to' / 'cuts back to … in the same framing as Shot N'을 쓰세요."),
+    ("style_frame_hold", re.compile(r"\bThe frame holds on\b|\buntil the shot ends\b", re.IGNORECASE),
+     "정지 지시('The frame holds on … until the shot ends') 대신 숨·바람·불빛·소리처럼 이어지는 움직임으로 샷을 끝내세요."),
+    ("style_from_first_frame", re.compile(r"\bfrom the first frame\b", re.IGNORECASE),
+     "'from the first frame' 대신 현재형 시작 상태('She is already standing')를 쓰세요."),
+    ("style_far_small", re.compile(r"\b(?:from far out|a little far off|small in the frame)\b", re.IGNORECASE),
+     "'far out / small in the frame'은 인물을 알아볼 수 없게 만듭니다. 거리는 화면 끝 위치와 빈 공간으로 쓰세요."),
+    ("style_face_in_shade", re.compile(r"\bface (?:lies|is|stays) in (?:the )?[\w ,-]*(?:shade|shadow)", re.IGNORECASE),
+     "얼굴을 그늘에 두면 표정이 죽습니다. 얼굴에 닿는 빛으로 쓰세요."),
+)
+STYLE_LIGHT_RE = re.compile(
+    r"\b(?:light|lit|glow\w*|sun\w*|dusk|dawn|twilight|afterglow|sky|shade|shadow\w*|"
+    r"fire\w*|torch\w*|moon\w*|flame\w*|ember\w*|lamp\w*|candle\w*|star\w*|night|"
+    r"firelight|torchlight|moonlight|flicker\w*|bright\w*|dim\w*)\b",
+    re.IGNORECASE,
+)
+STYLE_SOUND_RE = re.compile(
+    r"\b(?:sound\w*|hear[ds]?|heard|hush|wash\w*|crackl\w*|rustl\w*|whoosh\w*|splash\w*|bang|"
+    r"thud|rumbl\w*|hum\w*|chirp\w*|cr(?:y|ies)|breath\w*|pant\w*|wind|waves?|footsteps?|voice|"
+    r"lap\w*|slap\w*|hiss\w*|swish\w*|chime\w*|ring\w*|tone|splash\w*|creak\w*|knock\w*|"
+    r"crunch\w*|patter\w*|clatter\w*|scrap\w*|sizzl\w*|clink\w*|clack\w*|tick\w*|rasp\w*|squeak\w*|"
+    r"peep\w*|trill\w*|sniff\w*|whistl\w*|rattl\w*|"
+    r"says|asks|shouts|calls|murmurs|whispers)\b",
+    re.IGNORECASE,
+)
+# B2 v1: quoted onomatopoeia outside <d> ('tong— tong—', 'ttuk!') came out as odd voices; IR describes sounds in English.
+STYLE_QUOTED_SOUND_RE = re.compile(r"(?<![A-Za-z])'([^'\n]{1,25})'(?![A-Za-z])|\"([^\"\n]{1,25})\"")
+# B2 v2: IR opens a shot with short ordered sentences (median 18 words) and a separate camera sentence.
+STYLE_SHOT_PREFIX_RE = re.compile(r"^\s*(?:At \d{2}:\d{2}\.\d{3},\s*)?(?:the shot cuts (?:back )?to\s+)?", re.IGNORECASE)
+STYLE_CAMERA_RE = re.compile(r"\b[Tt]he camera (?:is|stays|remains|holds|sits|looks|tracks|moves|follows)\b")
+STYLE_OPENER_MAX_WORDS = 30
+# EP08 v1/v2: a face shot that also shows a knee/lap prop cut the head off (ours C15 3/3, IR C16 3/3).
+STYLE_FACE_OPENER_RE = re.compile(r"\b(?:medium close-up|close-up)\b", re.IGNORECASE)
+STYLE_LOW_PROP_RE = re.compile(
+    r"\bknees?\b|\b(?:his|her|its|their|a|the) lap\b|(?<!toward )(?<!towards )\bthe bottom of (?:the )?frame\b",
+    re.IGNORECASE)
+# A creature resting its chin on a knee is the subject of the shot, not a low prop (EP08 C36 worked 3/3).
+STYLE_LOW_PROP_OK_RE = re.compile(r"\bchin\b[^.]*\bknee|\bknees? of\b", re.IGNORECASE)
+# EP08 v1: "the boat sits small at the center" nearly vanished in a wide shot.
+STYLE_WIDE_OPENER_RE = re.compile(r"^(?:an? )?(?:[\w-]+ )?wide\b", re.IGNORECASE)
+STYLE_WIDE_SMALL_RE = re.compile(
+    r"\b(?:sits|stands|lies|glides|floats|whole bod\w*)\b[^.]*\bsmall(?:\s+(?:near|in|at|on|against|beside|by|within)\b|[,.])",
+    re.IGNORECASE)
+# EP08 v2: Mir's "킁?" written as <d> came out as an odd voice; IR writes animal noises as sound descriptions.
+STYLE_CREATURE_SOUND_LINE_RE = re.compile(r"^[킁끼잉낑꾸르륵캬컹꺄쿠뀨삐익갸냥멍꽥\s~!?….,—-]+$")
+DIALOGUE_CONTINUE_RE = re.compile(r"\b(?:continues|then adds|adds|goes on)\b", re.IGNORECASE)
+
+
+def _style_warnings(body: str, warnings: list[ValidationIssue], shot_number: int) -> None:
+    visible = DIALOGUE_RE.sub("", body)
+    for code, pattern, message in IR_STYLE_PATTERNS:
+        if pattern.search(visible):
+            _issue(warnings, code, f"[Shot {shot_number}] {message}", level="warning", shot=shot_number)
+    if ";" in visible:
+        _issue(warnings, "style_semicolon", f"[Shot {shot_number}] 세미콜론 대신 한 문장에 동작 하나를 쓰세요.",
+               level="warning", shot=shot_number)
+    if not STYLE_LIGHT_RE.search(visible):
+        _issue(warnings, "style_shot_light_missing",
+               f"[Shot {shot_number}] 샷 안에 빛 구절이 없습니다. 맨 앞 빛 문장만으로는 다른 시간대 배경 그림의 빛이 섞입니다.",
+               level="warning", shot=shot_number)
+    quoted = [q for m in STYLE_QUOTED_SOUND_RE.finditer(visible) for q in m.groups() if q]
+    if quoted:
+        _issue(warnings, "style_romanized_onomatopoeia",
+               f"[Shot {shot_number}] 대사 밖 따옴표 의성어 대신 소리를 영어로 묘사하세요"
+               f" (성질 + 동작, 예: 'a clear, ringing hollow tone', 'a small, puzzled sniffing sound'): {quoted[:3]}",
+               level="warning", shot=shot_number)
+    opener = STYLE_SHOT_PREFIX_RE.sub("", visible, count=1)
+    first = re.split(r"(?<=[.!?])\s+(?=[A-Z<])", opener.strip(), maxsplit=1)[0]
+    if len(first.split()) > STYLE_OPENER_MAX_WORDS:
+        _issue(warnings, "style_shot_opener_long",
+               f"[Shot {shot_number}] 샷 첫 문장이 {len(first.split())}단어입니다. '샷 크기 + 인물' 한 문장 뒤에"
+               " 카메라, 화면 범위, 화면 밖과 초점, 배경, 빛을 짧은 문장으로 나누세요.",
+               level="warning", shot=shot_number)
+    if (STYLE_FACE_OPENER_RE.search(first) and "insert" not in first.lower()
+            and STYLE_LOW_PROP_RE.search(visible) and not STYLE_LOW_PROP_OK_RE.search(visible)):
+        _issue(warnings, "style_mcu_low_prop",
+               f"[Shot {shot_number}] 얼굴 샷에 knee / lap / bottom of frame이 있으면 모델이 그 물건을 넣으려고"
+               " 머리를 자릅니다. 물건을 가슴 높이로 올리거나 인서트로 보내세요.",
+               level="warning", shot=shot_number)
+    if STYLE_WIDE_OPENER_RE.search(first) and STYLE_WIDE_SMALL_RE.search(visible):
+        _issue(warnings, "style_wide_subject_small",
+               f"[Shot {shot_number}] 와이드 샷의 주 피사체에 'small'을 쓰면 거의 안 보이게 됩니다."
+               " 크기 말 없이 위치와 동작만 쓰세요(사람 무리는 'small silhouettes'만 허용).",
+               level="warning", shot=shot_number)
+    if not STYLE_CAMERA_RE.search(visible):
+        _issue(warnings, "style_camera_sentence_missing",
+               f"[Shot {shot_number}] 카메라만 다루는 문장이 없습니다"
+               " (예: 'The camera is fixed at her seated eye level, viewing her from the front.').",
+               level="warning", shot=shot_number)
+    if not STYLE_SOUND_RE.search(body):
+        _issue(warnings, "style_shot_sound_missing", f"[Shot {shot_number}] 샷 안에 소리 문장이 없습니다.",
+               level="warning", shot=shot_number)
+    for dialogue in DIALOGUE_RE.finditer(body):
+        line = dialogue.group(2).strip()
+        if line and STYLE_CREATURE_SOUND_LINE_RE.match(line):
+            _issue(warnings, "style_creature_onomatopoeia_dialogue",
+                   f"[Shot {shot_number}] 동물의 말 아닌 소리를 <d> 대사로 쓰면 발성이 이상해집니다."
+                   f" 소리 묘사로 쓰세요(예: 'a small, puzzled sniffing sound is heard'): {line[:12]}",
+                   level="warning", shot=shot_number)
+        if line.startswith(("…", "...")):
+            _issue(warnings, "style_dialogue_leading_ellipsis",
+                   f"[Shot {shot_number}] 대사 앞 말줄임표 대신, 쉼은 숨 동작 문장으로 쓰세요: {line[:20]}",
+                   level="warning", shot=shot_number)
+        if len(re.findall(r"[.?!]+(?=\s+\S)", line)) >= 1 and len(re.sub(r"[\s.?!…,~]", "", line)) > 4:
+            _issue(warnings, "style_dialogue_multi_sentence",
+                   f"[Shot {shot_number}] 두 문장 대사는 <d>를 나누고 사이에 숨 동작을 쓰세요"
+                   " (예: 'He pauses to take a shallow, ragged breath, then continues,'): " + line[:30],
+                   level="warning", shot=shot_number)
+
+
 @dataclass(frozen=True)
 class ValidationIssue:
     level: str
@@ -232,7 +346,8 @@ def _validate_dialogue(
     previous_end = 0
     for dialogue in DIALOGUE_RE.finditer(body):
         lead = body[previous_end:dialogue.start()]
-        if not SPEAKER_RE.search(lead):
+        continued = previous_end > 0 and DIALOGUE_CONTINUE_RE.search(lead)
+        if not SPEAKER_RE.search(lead) and not continued:
             _issue(
                 errors,
                 "dialogue_speaker_missing",
@@ -423,6 +538,7 @@ def validate_prompt(
             previous_time = start
         _validate_first_subject_mentions(body, definitions, errors, shot_number)
         _validate_dialogue(body, errors, shot_number)
+        _style_warnings(body, warnings, shot_number)
 
     if duration_seconds is not None:
         if duration_seconds <= 0 or duration_seconds > 15:

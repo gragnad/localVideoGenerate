@@ -152,6 +152,11 @@ const MIME_TYPES = {
   '.webm': 'video/webm',
   '.mov': 'video/quicktime',
   '.zip': 'application/zip',
+  '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg',
+  '.flac': 'audio/flac',
+  '.ogg': 'audio/ogg',
+  '.m4a': 'audio/mp4',
 };
 
 async function stream(path, req, res, { staticFile = false, cacheSeconds = null } = {}) {
@@ -162,12 +167,13 @@ async function stream(path, req, res, { staticFile = false, cacheSeconds = null 
       ? (staticFile ? 'no-cache' : 'private, max-age=60')
       : `public, max-age=${cacheSeconds}`;
     const range = String(req.headers.range || '');
-    if (range && /^video\//.test(contentType)) {
+    if (range && /^(video|audio)\//.test(contentType)) {
       const match = range.match(/^bytes=(\d*)-(\d*)$/);
       if (match) {
-        const start = match[1] ? Number(match[1]) : 0;
-        const end = match[2] ? Math.min(Number(match[2]), info.size - 1) : info.size - 1;
-        if (start <= end && start < info.size) {
+        const suffix = !match[1] && match[2] ? Number(match[2]) : null;
+        const start = suffix !== null ? Math.max(0, info.size - suffix) : Number(match[1] || 0);
+        const end = suffix !== null ? info.size - 1 : match[2] ? Math.min(Number(match[2]), info.size - 1) : info.size - 1;
+        if ((match[1] || match[2]) && Number.isSafeInteger(start) && Number.isSafeInteger(end) && suffix !== 0 && start <= end && start < info.size) {
           res.writeHead(206, {
             'content-type': contentType,
             'content-length': end - start + 1,
@@ -186,7 +192,7 @@ async function stream(path, req, res, { staticFile = false, cacheSeconds = null 
     res.writeHead(200, {
       'content-type': contentType,
       'content-length': info.size,
-      'accept-ranges': /^video\//.test(contentType) ? 'bytes' : 'none',
+      'accept-ranges': /^(video|audio)\//.test(contentType) ? 'bytes' : 'none',
       'cache-control': cacheControl,
     });
     createReadStream(path).pipe(res);
@@ -542,22 +548,94 @@ async function route(req, res) {
     ));
   }
 
+  if (url.pathname === '/api/music-library' || url.pathname.startsWith('/api/music-library/')) {
+    if (req.method !== 'GET') return json(res, 405, {error: '음악 생성·수정은 이 페이지에서 제공하지 않습니다.'});
+    try {
+      if (url.pathname === '/api/music-library') {
+        return json(res, 200, await python('music_library_list', {
+          q: url.searchParams.get('q') || '', sort: url.searchParams.get('sort') || 'newest',
+          page: Number(url.searchParams.get('page') || 1), page_size: 24,
+        }));
+      }
+      const match = url.pathname.match(/^\/api\/music-library\/(music_[0-9a-f]{32})\/(download|audio)$/);
+      if (!match) return json(res, 404, {error: '음악 다운로드 경로를 찾을 수 없습니다.'});
+      const file = await python('music_library_download', {track_id: match[1]});
+      res.setHeader('content-disposition', `${match[2] === 'download' ? 'attachment' : 'inline'}; filename="music${extname(file.filename)}"; filename*=UTF-8''${encodeURIComponent(file.filename).replace(/['()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase())}`);
+      res.setHeader('x-content-type-options', 'nosniff');
+      return stream(file.path, req, res);
+    } catch (error) { return json(res, 400, {error: '음악을 불러오지 못했습니다. 등록 정보와 원본 파일을 확인하세요.'}); }
+  }
   if (req.method === 'GET' && url.pathname === '/api/h3/config') {
     return json(res, 200, await python('h3_config', {}));
+  }
+  if (url.pathname === '/api/project-comparisons' || url.pathname.startsWith('/api/project-comparisons/')) {
+    try {
+      let result;
+      const match = url.pathname.match(/^\/api\/project-comparisons\/(comparison_[0-9a-f]{32})$/);
+      if (url.pathname === '/api/project-comparisons' && req.method === 'GET') {
+        result = await python('project_comparisons_list', {
+          page: Number(url.searchParams.get('page') || 1), page_size: Number(url.searchParams.get('page_size') || 20),
+          left_job_id: url.searchParams.get('left_job_id') || '', right_job_id: url.searchParams.get('right_job_id') || '',
+        });
+      } else if (url.pathname === '/api/project-comparisons' && req.method === 'POST') {
+        result = await python('project_comparisons_save', await bodyJson(req, 16000));
+      } else if (match && req.method === 'GET') {
+        result = await python('project_comparisons_load', {comparison_id: match[1]});
+      } else return json(res, 404, {error: '비교 이력 경로를 찾을 수 없습니다.'});
+      return json(res, result.conflict ? 409 : result.not_found ? 404 : 200, result);
+    } catch (error) { return json(res, 400, {error: safeText(error.message)}); }
+  }
+  if (url.pathname === '/api/feedback-notes' || url.pathname.startsWith('/api/feedback-notes/')) {
+    try {
+      let result;
+      const match = url.pathname.match(/^\/api\/feedback-notes\/(note_[0-9a-f]{32})(?:\/(history|revisions\/([0-9a-f]{32})))?$/);
+      if (url.pathname === '/api/feedback-notes' && req.method === 'GET') {
+        result = await python('feedback_notes_list', {archived: url.searchParams.get('archived') === '1'});
+      } else if (url.pathname === '/api/feedback-notes' && req.method === 'POST') {
+        result = await python('feedback_notes_save', await bodyJson(req, 3_000_000));
+      } else if (match && req.method === 'GET') {
+        result = await python(match[2] === 'history' ? 'feedback_notes_history' : 'feedback_notes_load', {note_id: match[1], ...(match[3] ? {revision: match[3]} : {})});
+      } else if (match && !match[2] && req.method === 'PUT') {
+        result = await python('feedback_notes_save', {...(await bodyJson(req, 3_000_000)), note_id: match[1]});
+      } else return json(res, 404, {error: '노트 경로를 찾을 수 없습니다.'});
+      return json(res, result.conflict ? 409 : result.not_found ? 404 : 200, result);
+    } catch (error) { return json(res, 400, {error: safeText(error.message)}); }
+  }
+  const feedbackVideo = url.pathname.match(/^\/api\/h3\/jobs\/([^/]+)\/feedback-context$/);
+  if (feedbackVideo && req.method === 'GET') {
+    const result = await python('feedback_notes_video', {job_id: decodeURIComponent(feedbackVideo[1])});
+    return json(res, result.not_found ? 404 : 200, result);
   }
   if (req.method === 'GET' && url.pathname === '/api/h3/state') {
     return json(res, 200, await python('h3_state', {}));
   }
   if (req.method === 'GET' && url.pathname === '/api/h3/candidate-page') {
     return json(res, 200, await python('h3_candidate_page', {
+      episode: url.searchParams.get('episode') || '',
       project_id: url.searchParams.get('project_id') || '',
       scene_id: url.searchParams.get('scene_id') || '',
+      clip_id: url.searchParams.get('clip_id') || '',
       page: Number(url.searchParams.get('page') || 1),
       page_size: Number(url.searchParams.get('page_size') || 10),
     }));
   }
+  if (url.pathname === '/api/h3/selected-screening' && ['GET', 'PUT'].includes(req.method)) {
+    try {
+      const result = await python(req.method === 'GET' ? 'selected_screening_load' : 'selected_screening_save', req.method === 'GET' ? {
+        ...(url.searchParams.getAll('project_id').length > 1
+          ? {project_ids: url.searchParams.getAll('project_id')}
+          : {project_id: url.searchParams.get('project_id') || ''}),
+        scene_id: url.searchParams.get('scene_id') || '',
+      } : await bodyJson(req, 3_000_000));
+      return json(res, result.conflict ? 409 : 200, result);
+    } catch (error) { return json(res, 400, {error: safeText(error.message)}); }
+  }
   if (req.method === 'GET' && url.pathname === '/api/h3/results-page') {
     return json(res, 200, await python('h3_results_page', {
+      episode: url.searchParams.get('episode') || '',
+      sort_by: url.searchParams.get('sort_by') || '',
+      focus_job_id: url.searchParams.get('focus_job_id') || '',
+      rerender_count: url.searchParams.get('rerender_count') || '',
       project_id: url.searchParams.get('project_id') || '',
       scene_id: url.searchParams.get('scene_id') || '',
       page: Number(url.searchParams.get('page') || 1),
@@ -639,6 +717,9 @@ async function route(req, res) {
   }
   if (req.method === 'POST' && url.pathname === '/api/h3/scenes/candidate-sets') {
     return json(res, 201, await python('queue_h3_scene_candidates', await bodyJson(req)));
+  }
+  if (req.method === 'POST' && url.pathname === '/api/h3/projects/candidate-sets') {
+    return json(res, 201, await python('queue_h3_project_candidates', await bodyJson(req)));
   }
   const groupStop = url.pathname.match(/^\/api\/h3\/queue-groups\/([^/]+)\/force-stop$/);
   if (req.method === 'POST' && groupStop) {
